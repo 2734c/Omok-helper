@@ -7,3 +7,7 @@ local.properties
 .DS_Store
 captures/
 *.apk
+
+# 키 생성기 비밀 키 (절대 올리지 말 것)
+*.key
+tools/omok-private*

@@ -15,7 +15,9 @@ import android.provider.Settings;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.text.InputType;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
@@ -52,6 +54,13 @@ public class MainActivity extends Activity {
         root.addView(title);
         root.addView(text("게임 화면의 바둑판을 감지해서 다음에 둘 좋은 자리를 표시해 줍니다.", 14, 0xFF6B5B4B, false));
 
+        // ---------------- 키
+        boolean pro = License.isPro(this);
+        root.addView(section("🔑 키"));
+        LinearLayout keyCard = card();
+        root.addView(keyCard);
+        buildKeyCard(keyCard, pro);
+
         // ---------------- 설정
         root.addView(section("설정"));
         LinearLayout card = card();
@@ -67,16 +76,17 @@ public class MainActivity extends Activity {
 
         card.addView(label("추천 받을 돌"));
         card.addView(radios(new String[]{"자동 (차례인 쪽)", "흑", "백"}, prefs.myColor,
-                i -> prefs.myColor = i));
+                i -> prefs.myColor = i, pro ? null : new boolean[]{false, true, true}));
 
         card.addView(label("추천 개수"));
         int topIdx = prefs.topN == 1 ? 0 : (prefs.topN == 5 ? 2 : 1);
         card.addView(radios(new String[]{"1개", "3개", "5개"}, topIdx,
-                i -> prefs.topN = i == 0 ? 1 : (i == 2 ? 5 : 3)));
+                i -> prefs.topN = i == 0 ? 1 : (i == 2 ? 5 : 3), pro ? null : new boolean[]{false, false, true}));
 
         card.addView(label("AI 생각 시간 (길수록 더 깊게 읽음)"));
         card.addView(radios(new String[]{"0.5초", "1.5초", "3초"}, prefs.thinkLevel,
-                i -> prefs.thinkLevel = i));
+                i -> prefs.thinkLevel = i, pro ? null : new boolean[]{false, false, true}));
+        if (!pro) card.addView(text("🔒 표시된 기능은 키를 등록하면 쓸 수 있어요.", 13, 0xFF8D6E63, false));
 
         // ---------------- 시작
         root.addView(section("시작하기"));
@@ -216,13 +226,20 @@ public class MainActivity extends Activity {
     }
 
     private RadioGroup radios(String[] labels, int checked, OnPick onPick) {
+        return radios(labels, checked, onPick, null);
+    }
+
+    /** locked[i]가 true인 항목은 키가 없어서 고를 수 없음 (🔒 표시) */
+    private RadioGroup radios(String[] labels, int checked, OnPick onPick, boolean[] locked) {
         RadioGroup g = new RadioGroup(this);
         g.setOrientation(labels.length <= 3 && labels[labels.length - 1].length() < 12
                 ? RadioGroup.HORIZONTAL : RadioGroup.VERTICAL);
         for (int i = 0; i < labels.length; i++) {
             RadioButton b = new RadioButton(this);
             b.setId(View.generateViewId());
-            b.setText(labels[i]);
+            boolean lock = locked != null && locked[i];
+            b.setText(lock ? labels[i] + " 🔒" : labels[i]);
+            b.setEnabled(!lock);
             b.setTextSize(14);
             b.setPadding(0, 0, dp(12), 0);
             final int idx = i;
@@ -236,6 +253,47 @@ public class MainActivity extends Activity {
             if (i == checked) b.setChecked(true);
         }
         return g;
+    }
+
+    // ------------------------------------------------------------------ 키 입력
+
+    private void buildKeyCard(LinearLayout keyCard, boolean pro) {
+        LicenseKey k = License.current(this);
+        if (pro && k != null) {
+            TextView ok = text("✓ 키 등록됨 (" + License.describe(k) + ")\n모든 기능을 쓸 수 있어요.", 14, 0xFF2E7D32, true);
+            keyCard.addView(ok);
+            Button remove = button("키 삭제", 0xFF9E9E9E);
+            remove.setOnClickListener(v -> {
+                License.clear(this);
+                Toast.makeText(this, "키를 삭제했습니다", Toast.LENGTH_SHORT).show();
+                buildUi();
+            });
+            keyCard.addView(remove);
+            return;
+        }
+        keyCard.addView(text("키가 없으면 흑/백 선택, 추천 5개, 생각 시간 3초를 쓸 수 없어요.\n"
+                + "받은 키(OMOK1-로 시작)를 붙여 넣고 [키 등록]을 누르세요.", 14, 0xFF3E3329, false));
+        EditText input = new EditText(this);
+        input.setHint("OMOK1-…");
+        input.setTypeface(Typeface.MONOSPACE);
+        input.setTextSize(13);
+        input.setMinLines(2);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        keyCard.addView(input);
+        Button reg = button("키 등록", 0xFF5D4037);
+        reg.setOnClickListener(v -> {
+            int r = License.register(this, input.getText().toString());
+            if (r == 0) {
+                Toast.makeText(this, "키가 등록되었습니다. 모든 기능이 열렸어요!", Toast.LENGTH_LONG).show();
+                buildUi();
+            } else {
+                Toast.makeText(this, r == 2 ? "사용 기간이 지난 키입니다" : "올바르지 않은 키입니다. 다시 확인해 주세요",
+                        Toast.LENGTH_LONG).show();
+            }
+        });
+        keyCard.addView(reg);
+        keyCard.addView(text("키 문의 : Discord axkoth", 12, 0xFF8D6E63, false));
     }
 
     private Button button(String s, int color) {

@@ -38,6 +38,31 @@
 
 표시 크기를 바꿔도 추천 고리는 돌 인식에 쓰는 교차점 한가운데를 가리지 않도록 설계했고, 모든 색·크기 조합에서 고리가 돌로 잘못 인식되지 않는지 테스트로 확인합니다.
 
+## 🔑 키 (라이선스)
+
+키가 없어도 앱을 쓸 수 있지만, 아래 기능은 **키를 등록해야** 열립니다.
+
+| 기능 | 키 없음 | 키 등록 |
+|---|---|---|
+| 내 돌 선택 | 자동만 | 자동 / 흑 / 백 |
+| 추천 개수 | 1개, 3개 | 1개, 3개, **5개** |
+| AI 생각 시간 | 0.5초, 1.5초 | 0.5초, 1.5초, **3초** |
+
+**등록 방법** : 앱 첫 화면의 "🔑 키" 칸에 받은 키(`OMOK1-`로 시작)를 붙여 넣고 [키 등록]. 키 문의 : Discord `axkoth`
+
+**원리 (전자서명)** — `LicenseKey.java`
+- 키를 만드는 사람은 **비밀 키**로 키 내용(키 번호, 만료일)에 ECDSA P-256 서명을 합니다.
+- 앱에는 **공개 키**만 들어 있어서 서명이 맞는지 확인만 할 수 있고, 새 키를 만들 수는 없습니다.
+- 키 내용을 한 글자라도 바꾸면 서명이 맞지 않아 거부됩니다. 서버 없이 인터넷 연결 없이 동작합니다.
+
+**키 발급 (저작권자 전용)** — `tools/KeyGen.java`
+```bash
+java KeyGen.java make 7               # 7번 키 (무기한)
+java KeyGen.java make 8 2027-03-01    # 8번 키, 2027-03-01까지
+java KeyGen.java make 10 20           # 10~20번 키 여러 개
+```
+비밀 키 파일 `omok-private.key`가 같은 폴더에 있어야 하며, 이 파일은 `.gitignore`로 저장소에 올라가지 않게 막혀 있습니다.
+
 ## 동작 원리
 
 ```
@@ -103,11 +128,15 @@ app/src/main/java/com/omokhelper/
 ├── DeepSearch.java         깊이 탐색 AI (알파-베타, 반복 심화, 치환표)
 ├── OverlayController.java  게임 위 표시 창, 조작 패널(설정·프리셋), 판 맞추기 화면
 ├── Themes.java             추천 색 / 패널 색 테마
-└── Prefs.java              설정 + 판 프리셋 저장
+├── Prefs.java              설정 + 판 프리셋 저장
+├── LicenseKey.java         키 서명 확인 (ECDSA)
+└── License.java            키 등록·저장, 잠금 기능 판단
 app/src/test/java/com/omokhelper/
 ├── OmokEngineTest.java     엔진 테스트 (5목, 막기, 4-3, VCF, 금수 등)
 ├── BoardDetectorTest.java  가짜 게임 화면으로 인식 테스트
-└── DeepSearchTest.java     깊이 탐색 테스트
+├── DeepSearchTest.java     깊이 탐색 테스트
+└── LicenseKeyTest.java     키 확인 테스트 (위조·변조·만료)
+tools/KeyGen.java           키 생성기 (저작권자 PC에서 실행)
 ```
 
 ## 직접 빌드하기

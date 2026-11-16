@@ -36,6 +36,12 @@ public final class Prefs {
         p.y0 = s.getFloat("y0", 0);
         p.x1 = s.getFloat("x1", 0);
         p.y1 = s.getFloat("y1", 0);
+        // 키가 없으면 잠긴 기능은 기본값으로 (흑/백 선택, 추천 5개, 생각 시간 3초)
+        if (!License.isPro(c)) {
+            p.myColor = 0;
+            if (p.topN > 3) p.topN = 3;
+            if (p.thinkLevel > 1) p.thinkLevel = 1;
+        }
         return p;
     }
 

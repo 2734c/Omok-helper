@@ -370,6 +370,11 @@ public final class OverlayController {
 
     /** 내 돌 색 변경 : 0 = 자동(차례인 쪽), 1 = 흑, 2 = 백 */
     private void setMyColor(int c) {
+        if (c != 0 && !License.isPro(ctx)) {
+            setStatus("🔒 흑/백 선택은 키를 등록해야 쓸 수 있어요.\n앱 첫 화면에서 키를 입력하세요.");
+            updateColorChip();
+            return;
+        }
         Prefs p = Prefs.load(ctx);
         p.myColor = c;
         p.save(ctx);
@@ -400,7 +405,7 @@ public final class OverlayController {
             colorChip.setTextColor(Color.WHITE);
         }
         colorChip.setBackground(bg);
-        colorChip.setText("나: " + MY_COLOR_NAMES[c] + " ⇄");
+        colorChip.setText("나: " + MY_COLOR_NAMES[c] + (License.isPro(ctx) ? " ⇄" : " 🔒"));
     }
 
     private void loadPreset(int slot) {
@@ -433,7 +438,10 @@ public final class OverlayController {
         }
         String[] sizeNames = {"작게", "보통", "크게"};
         for (int i = 0; i < 3; i++) sizeButtons[i].setText((i == p.displaySize ? "✓ " : "") + sizeNames[i]);
-        for (int i = 0; i < 3; i++) colorButtons[i].setText((i == p.myColor ? "✓ " : "") + MY_COLOR_NAMES[i]);
+        boolean pro = License.isPro(ctx);
+        for (int i = 0; i < 3; i++) {
+            colorButtons[i].setText((i == p.myColor ? "✓ " : "") + MY_COLOR_NAMES[i] + (!pro && i != 0 ? " 🔒" : ""));
+        }
 
         // 추천 색 : 색 점 3개로 미리보기
         int[] mc = Themes.MARKER_THEMES[p.markerTheme % Themes.MARKER_THEMES.length];
