@@ -110,6 +110,44 @@ public class BoardDetectorTest {
         }
     }
 
+    /** 게임이 금수 자리 등에 그리는 표시(빨간 점, ×, 반투명 돌)는 돌이 아니다 */
+    @Test
+    public void gameMarksAreNotStones() {
+        int n = 15, ox = 40, oy = 300;
+        float cell = 66f;
+        int bg = 0xdcb35c;
+        FakeScreen s = new FakeScreen(1080, 2000, 0x223344);
+        s.rect(ox - 30, oy - 30, (int) (ox + cell * 14 + 30), (int) (oy + cell * 14 + 30), bg);
+        for (int i = 0; i < n; i++) {
+            int p = Math.round(i * cell);
+            s.rect(ox + p - 1, oy, ox + p + 1, (int) (oy + cell * 14), 0x3a2a10);
+            s.rect(ox, oy + p - 1, (int) (ox + cell * 14), oy + p + 1, 0x3a2a10);
+        }
+        s.circle(ox + 3 * cell, oy + 3 * cell, cell * 0.30f, 0xff2020);                 // 빨간 점
+        xMark(s, ox + 5 * cell, oy + 5 * cell, cell * 0.30f, cell * 0.12f, 0xe53935);    // 빨간 ×
+        s.circle(ox + 7 * cell, oy + 7 * cell, cell * 0.46f, 0x786435);                  // 반투명 흑돌(미리보기)
+        xMark(s, ox + 9 * cell, oy + 9 * cell, cell * 0.30f, cell * 0.10f, 0x202020);    // 검은 ×
+        s.circle(ox + 11 * cell, oy + 11 * cell, cell * 0.25f, 0xc62828);                // 진한 빨간 점
+        // 진짜 돌도 함께 (마지막 수 빨간 점 포함)
+        s.circle(ox + 2 * cell, oy + 9 * cell, cell * 0.46f, 0x151515);
+        s.circle(ox + 2 * cell, oy + 9 * cell, cell * 0.10f, 0xff2020);
+        s.circle(ox + 12 * cell, oy + 2 * cell, cell * 0.46f, 0x808080);
+        s.circle(ox + 12 * cell, oy + 2 * cell, cell * 0.43f, 0xf2f2f2);
+
+        int[] expected = new int[n * n];
+        expected[9 * n + 2] = OmokEngine.BLACK;
+        expected[2 * n + 12] = OmokEngine.WHITE;
+        assertArrayEquals(expected, BoardDetector.detect(s, ox, oy, ox + cell * 14, oy + cell * 14, n, null));
+    }
+
+    private static void xMark(FakeScreen s, float cx, float cy, float r, float t, int c) {
+        for (int y = (int) (cy - r); y <= cy + r; y++)
+            for (int x = (int) (cx - r); x <= cx + r; x++) {
+                float dx = x - cx, dy = y - cy;
+                if (Math.abs(dx - dy) <= t * 0.7f || Math.abs(dx + dy) <= t * 0.7f) s.px[y * s.w + x] = c;
+            }
+    }
+
     private static void ring(FakeScreen s, float cx, float cy, float r0, float r1, int c) {
         for (int y = (int) (cy - r1) - 1; y <= cy + r1 + 1; y++)
             for (int x = (int) (cx - r1) - 1; x <= cx + r1 + 1; x++) {

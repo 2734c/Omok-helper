@@ -259,16 +259,41 @@ public class CaptureService extends Service implements OverlayController.Listene
         float cw = (p.x1 - p.x0) / (n - 1), ch = (p.y1 - p.y0) / (n - 1);
         float cell = Math.min(Math.abs(cw), Math.abs(ch));
 
+        // 금수 자리 (규칙에 금수가 있는 쪽만)
+        List<OverlayController.Dot> dots = new ArrayList<>();
+        StringBuilder forbidden = new StringBuilder();
+        int forbiddenCount = 0;
+        for (int y = 0; y < n; y++) {
+            for (int x = 0; x < n; x++) {
+                int v = board[y * n + x];
+                float sx = p.x0 + x * cw, sy = p.y0 + y * ch;
+                if (v != OmokEngine.EMPTY) {
+                    if (p.showDetection) dots.add(new OverlayController.Dot(sx, sy, v));
+                    continue;
+                }
+                for (int color = OmokEngine.BLACK; color <= OmokEngine.WHITE; color++) {
+                    if (!engine.hasBans(color) || !engine.isForbidden(x, y, color)) continue;
+                    if (p.showDetection) dots.add(new OverlayController.Dot(sx, sy, color == OmokEngine.BLACK ? 3 : 4));
+                    if (color == side) {
+                        if (forbiddenCount < 5) forbidden.append(forbiddenCount == 0 ? "" : ", ").append(engine.coord(x, y));
+                        forbiddenCount++;
+                    }
+                }
+            }
+        }
+        String forbiddenLine = forbiddenCount == 0 ? ""
+                : "\n🚫 " + colorName(side) + " 금수 " + forbiddenCount + "곳: " + forbidden + (forbiddenCount > 5 ? " …" : "");
+
         if (p.myColor != 0 && side != p.myColor) {
             String s = "상대(" + colorName(side) + ") 차례 — 기다리는 중\n" + counts;
-            main.post(() -> overlay.showResult(new ArrayList<>(), cell, s));
+            main.post(() -> overlay.showResult(new ArrayList<>(), dots, cell, s));
             return;
         }
 
         OmokEngine.Result r = engine.recommendDeep(side, p.topN, p.thinkMs());
         List<OverlayController.Marker> markers = new ArrayList<>();
         StringBuilder sb = new StringBuilder();
-        sb.append(colorName(side)).append(" 차례 추천 (").append(counts).append(")\n");
+        sb.append(colorName(side)).append(" 차례 추천 (").append(counts).append(")").append(forbiddenLine).append('\n');
         for (int i = 0; i < r.moves.size(); i++) {
             OmokEngine.Move m = r.moves.get(i);
             boolean win = m.reason.startsWith("5목") || m.reason.startsWith("필승");
@@ -298,7 +323,7 @@ public class CaptureService extends Service implements OverlayController.Listene
             if (r.threatSequence != null) sb.append("⚠ 상대에게 연속 4 필승 수순이 있어요!");
         }
         String status = sb.toString().trim();
-        main.post(() -> overlay.showResult(markers, cell, status));
+        main.post(() -> overlay.showResult(markers, dots, cell, status));
     }
 
     private static String colorName(int c) {

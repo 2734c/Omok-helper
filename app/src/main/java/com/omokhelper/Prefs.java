@@ -13,6 +13,7 @@ public final class Prefs {
     public int markerTheme = 0;      // 추천 표시 색 (Themes.MARKER_THEMES)
     public int panelTheme = 0;       // 패널 색 (Themes.PANEL_THEMES)
     public int displaySize = 1;      // 0 = 작게, 1 = 보통, 2 = 크게
+    public boolean showDetection = false; // 인식 결과(읽은 돌, 금수 자리) 표시
     public boolean calibrated = false;
     public float x0, y0, x1, y1;     // 왼쪽 위 / 오른쪽 아래 교차점의 화면 좌표
 
@@ -33,6 +34,7 @@ public final class Prefs {
         p.markerTheme = s.getInt("markerTheme", 0);
         p.panelTheme = s.getInt("panelTheme", 0);
         p.displaySize = s.getInt("displaySize", 1);
+        p.showDetection = s.getBoolean("showDetection", false);
         p.calibrated = s.getBoolean("calibrated", false);
         p.x0 = s.getFloat("x0", 0);
         p.y0 = s.getFloat("y0", 0);
@@ -57,6 +59,7 @@ public final class Prefs {
                 .putInt("markerTheme", markerTheme)
                 .putInt("panelTheme", panelTheme)
                 .putInt("displaySize", displaySize)
+                .putBoolean("showDetection", showDetection)
                 .putBoolean("calibrated", calibrated)
                 .putFloat("x0", x0)
                 .putFloat("y0", y0)

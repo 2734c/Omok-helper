@@ -240,6 +240,47 @@ public class OmokEngineTest {
         assertEquals("자유룰", OmokEngine.ruleName(OmokEngine.RULE_FREE));
     }
 
+    /** 한 줄 안의 4-4 (X_XXX_X 모양) 는 렌주룰 흑 금수 */
+    @Test
+    public void sameLineDoubleFourIsForbiddenForBlack() {
+        // 가로 X.X?X.X 에서 ?(5,3)에 흑을 두면 X.XXX.X 가 된다
+        OmokEngine e = board(true,
+                "...............",
+                "...............",
+                "...............",
+                "..X.X.X.X......",
+                "...............",
+                "..O.......O....");
+        // (5,3)에 흑을 두면 X.XXX.X : 양쪽 빈칸 어디를 둬도 5목 → 한 줄 4-4
+        assertTrue(e.isForbidden(5, 3, OmokEngine.BLACK));
+        // 자유룰에서는 금수가 아니고 오히려 필승(4-4)
+        OmokEngine f = board(false,
+                "...............",
+                "...............",
+                "...............",
+                "..X.X.X.X......",
+                "...............",
+                "..O.......O....");
+        assertFalse(f.isForbidden(5, 3, OmokEngine.BLACK));
+        OmokEngine.Shape s = f.analyze(5, 3, OmokEngine.BLACK);
+        assertEquals(2, s.fours());
+        assertEquals(0, s.openFour);
+    }
+
+    /** 진짜 열린 4(_XXXX_)는 4가 한 개 */
+    @Test
+    public void straightFourIsOneOpenFour() {
+        OmokEngine e = board(true,
+                "...............",
+                "...............",
+                "...............",
+                "....XX.X.......");
+        OmokEngine.Shape s = e.analyze(6, 3, OmokEngine.BLACK);
+        assertEquals(1, s.openFour);
+        assertEquals(1, s.fours());
+        assertFalse(e.isForbidden(6, 3, OmokEngine.BLACK));
+    }
+
     @Test
     public void closedThreeIsNotOpen() {
         // O.XXX.O : 양쪽이 바로 막혀 있어서 열린 3이 아니다

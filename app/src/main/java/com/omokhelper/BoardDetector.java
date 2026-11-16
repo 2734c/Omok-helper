@@ -34,7 +34,7 @@ public final class BoardDetector {
      * @param skip  이 사각형 [left, top, right, bottom] 안의 교차점은 UNKNOWN (오버레이 창에 가려진 곳). null 가능
      * @return 길이 n*n, 값은 EMPTY / BLACK / WHITE / UNKNOWN
      */
-    public static int[] detect(PixelSource src, float x0, float y0, float x1, float y1, int n, int[] skip) {
+    public static synchronized int[] detect(PixelSource src, float x0, float y0, float x1, float y1, int n, int[] skip) {
         float cw = (x1 - x0) / (n - 1);
         float ch = (y1 - y0) / (n - 1);
         float cell = Math.min(Math.abs(cw), Math.abs(ch));
@@ -79,14 +79,33 @@ public final class BoardDetector {
                         m++;
                     }
                 }
-                out[j * n + i] = classify(median(ls, m), median(ss, m), lb, sb);
+                int inner = classify(median(ls, m), median(ss, m), lb, sb);
+                if (inner != OmokEngine.EMPTY) {
+                    // 바깥 고리(반지름 0.34칸)도 같은 색이어야 진짜 돌.
+                    // 게임이 금수 자리 등에 그리는 작은 점·× 표시는 바깥 고리까지 닿지 않는다.
+                    float ringR = cell * 0.34f;
+                    for (int q = 0; q < RING_POINTS; q++) {
+                        double t = 2 * Math.PI * q / RING_POINTS;
+                        int c = safeRgb(src, cx + (float) (ringR * Math.cos(t)), cy + (float) (ringR * Math.sin(t)));
+                        ringL[q] = lum(c);
+                        ringS[q] = sat(c);
+                    }
+                    int outer = classify(median(ringL, RING_POINTS), median(ringS, RING_POINTS), lb, sb);
+                    if (outer != inner) inner = OmokEngine.EMPTY;
+                }
+                out[j * n + i] = inner;
             }
         }
         return out;
     }
 
+    private static final int RING_POINTS = 24;
+    private static final float[] ringL = new float[RING_POINTS];
+    private static final float[] ringS = new float[RING_POINTS];
+
     static int classify(float l, float s, float lb, float sb) {
-        if (l < Math.min(lb * 0.55f, 110f)) return OmokEngine.BLACK;
+        // 흑돌 : 아주 어둡고 색이 거의 없음 (빨간 점 같은 색 있는 표시는 제외)
+        if (l < Math.min(lb * 0.55f, 110f) && s < 0.4f) return OmokEngine.BLACK;
         boolean brighter = l - lb >= 20f;
         boolean grayer = s < sb - 0.15f;
         if (l >= 150f && s < 0.3f && (brighter || grayer)) return OmokEngine.WHITE;

@@ -27,7 +27,8 @@ public final class OmokEngine {
 
     // 한 줄(방향)의 모양 종류
     static final int T_NONE = 0, T_TWO = 1, T_OPEN_TWO = 2, T_THREE = 3, T_OPEN_THREE = 4,
-            T_FOUR = 5, T_OPEN_FOUR = 6, T_FIVE = 7, T_OVERLINE = 8;
+            T_FOUR = 5, T_OPEN_FOUR = 6, T_FIVE = 7, T_OVERLINE = 8,
+            T_DOUBLE_FOUR = 9; // 한 줄 안의 4-4 (예: X_XXX_X) — 렌주룰에서는 4-4 금수
 
     // ---------------------------------------------------------------- 규칙 (항목별로 켜고 끔)
     public static final int B_OVERLINE = 1;  // 흑 6목 이상(장목) 금지 : 승리로 치지 않고, 그 자리에 둘 수 없음
@@ -175,6 +176,24 @@ public final class OmokEngine {
     }
 
     /** 돌 하나를 더 놓아 5목을 만들 수 있는 빈칸의 수 (1이면 4, 2 이상이면 열린 4) */
+    /** 5목을 만드는 빈칸 위치들의 비트 마스크 */
+    private static int completionMask(int[] a, boolean exact) {
+        int mask = 0;
+        for (int i = 0; i < 11; i++) {
+            if (a[i] != 0) continue;
+            a[i] = 1;
+            if (isFive(a, exact)) mask |= 1 << i;
+            a[i] = 0;
+        }
+        return mask;
+    }
+
+    /** 진짜 열린 4 (_XXXX_) : 5목 자리 두 곳이 정확히 5칸 떨어져 있음 */
+    private static boolean isStraightFour(int mask) {
+        for (int i = 0; i + 5 < 11; i++) if ((mask >> i & 1) != 0 && (mask >> (i + 5) & 1) != 0) return true;
+        return false;
+    }
+
     private static int fiveCompletions(int[] a, boolean exact) {
         int c = 0;
         for (int i = 0; i < 11; i++) {
@@ -190,8 +209,9 @@ public final class OmokEngine {
         int run = centerRun(a);
         if (run >= 5) return (exact && run > 5) ? T_OVERLINE : T_FIVE;
 
-        int f = fiveCompletions(a, exact);
-        if (f >= 2) return T_OPEN_FOUR;
+        int fm = completionMask(a, exact);
+        int f = Integer.bitCount(fm);
+        if (f >= 2) return isStraightFour(fm) ? T_OPEN_FOUR : T_DOUBLE_FOUR;
         if (f == 1) return T_FOUR;
 
         // 한 수 더 두면 4가 되는가? -> 3
@@ -200,9 +220,10 @@ public final class OmokEngine {
             if (a[i] != 0) continue;
             a[i] = 1;
             if (centerRun(a) < 6 || !exact) {
-                int f2 = fiveCompletions(a, exact);
-                if (f2 >= 2) open3 = true;
-                else if (f2 == 1) three = true;
+                int m2 = completionMask(a, exact);
+                int f2 = Integer.bitCount(m2);
+                if (f2 >= 2 && isStraightFour(m2)) open3 = true; // 열린 3 = 진짜 열린 4가 될 수 있는 3
+                else if (f2 >= 1) three = true;
             }
             a[i] = 0;
         }
@@ -280,6 +301,7 @@ public final class OmokEngine {
                 case T_FIVE: s.five++; break;
                 case T_OVERLINE: s.overline++; break;
                 case T_OPEN_FOUR: s.openFour++; break;
+                case T_DOUBLE_FOUR: s.four += 2; break;
                 case T_FOUR: s.four++; break;
                 case T_OPEN_THREE: s.openThree++; break;
                 case T_THREE: s.three++; break;

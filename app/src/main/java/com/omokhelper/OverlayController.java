@@ -76,7 +76,7 @@ public final class OverlayController {
     private final Button[] colorButtons = new Button[3];
     private TextView colorChip;
     private static final String[] MY_COLOR_NAMES = {"자동", "흑", "백"};
-    private Button markerColorButton, panelColorButton;
+    private Button markerColorButton, panelColorButton, detectionButton;
     private FrameLayout calibLayer;
 
     private boolean paused = false;
@@ -152,8 +152,25 @@ public final class OverlayController {
 
     // ------------------------------------------------------------------ 결과 표시
 
+    /** 인식 결과 표시용 작은 점 : 1 = 흑돌, 2 = 백돌, 3 = 흑 금수 자리, 4 = 백 금수 자리 */
+    public static final class Dot {
+        final float x, y;
+        final int kind;
+
+        public Dot(float x, float y, int kind) {
+            this.x = x;
+            this.y = y;
+            this.kind = kind;
+        }
+    }
+
     public void showResult(List<Marker> markers, float cell, String status) {
+        showResult(markers, new ArrayList<>(), cell, status);
+    }
+
+    public void showResult(List<Marker> markers, List<Dot> dots, float cell, String status) {
         if (markerView == null) return;
+        markerView.dots = dots;
         markerView.setMarkers(markers, cell);
         if (statusText != null) statusText.setText(status);
     }
@@ -345,6 +362,18 @@ public final class OverlayController {
         }
         box.addView(sizeRow);
 
+        // 인식 결과 보기
+        box.addView(settingsLabel("인식 확인 — 읽은 돌과 금수 자리를 작게 표시"));
+        detectionButton = smallButton("");
+        detectionButton.setOnClickListener(v -> {
+            Prefs p = Prefs.load(ctx);
+            p.showDetection = !p.showDetection;
+            p.save(ctx);
+            refreshSettings();
+            listener.onSettingsChanged();
+        });
+        box.addView(detectionButton);
+
         // 색 (누를 때마다 다음 색)
         box.addView(settingsLabel("색 — 누를 때마다 바뀜"));
         markerColorButton = smallButton("");
@@ -454,6 +483,7 @@ public final class OverlayController {
         sb.append("  ").append(Themes.MARKER_THEME_NAMES[p.markerTheme % Themes.MARKER_THEMES.length]).append(" ▸");
         markerColorButton.setText(sb);
         panelColorButton.setText("패널 색  " + Themes.PANEL_THEME_NAMES[p.panelTheme % Themes.PANEL_THEMES.length] + " ▸");
+        detectionButton.setText(p.showDetection ? "인식 결과 보기 : 켬 ✓" : "인식 결과 보기 : 끔");
     }
 
     /** 저장된 색·크기 설정을 패널과 추천 표시에 적용 */
@@ -730,7 +760,9 @@ public final class OverlayController {
 
     private static final class MarkerView extends View {
         private List<Marker> markers = new ArrayList<>();
+        List<Dot> dots = new ArrayList<>();
         private float cell;
+        private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         int[] colors = Themes.MARKER_THEMES[0];
         float scale = 1f; // 0.85 ~ 1.25 : 이 범위에서는 돌 인식 영역(반지름 0.26칸)을 가리지 않는다
         private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -754,8 +786,25 @@ public final class OverlayController {
 
         @Override
         protected void onDraw(Canvas c) {
-            if (markers.isEmpty() || cell <= 0) return;
+            if ((markers.isEmpty() && dots.isEmpty()) || cell <= 0) return;
             getLocationOnScreen(loc);
+
+            // 인식 결과 : 교차점에서 떨어진 모서리에 작게 그린다 (돌 인식 영역을 가리지 않도록)
+            for (Dot d : dots) {
+                float x = d.x - loc[0], y = d.y - loc[1];
+                if (d.kind == 1 || d.kind == 2) {
+                    dotPaint.setStyle(Paint.Style.FILL);
+                    dotPaint.setColor(d.kind == 1 ? 0xFF00E5FF : 0xFFFF4081);
+                    c.drawCircle(x - cell * 0.38f, y - cell * 0.38f, cell * 0.07f, dotPaint);
+                } else {
+                    dotPaint.setStyle(Paint.Style.STROKE);
+                    dotPaint.setStrokeWidth(Math.max(2f, cell * 0.035f));
+                    dotPaint.setColor(d.kind == 3 ? 0xFFFF1744 : 0xFFAA00FF);
+                    float bx = x + cell * 0.38f, by = y + cell * 0.38f, h = cell * 0.08f;
+                    c.drawLine(bx - h, by - h, bx + h, by + h, dotPaint);
+                    c.drawLine(bx - h, by + h, bx + h, by - h, dotPaint);
+                }
+            }
             for (int i = markers.size() - 1; i >= 0; i--) {
                 Marker m = markers.get(i);
                 float x = m.x - loc[0], y = m.y - loc[1];
