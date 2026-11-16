@@ -90,6 +90,7 @@ java KeyGen.java make 10 20           # 10~20번 키 여러 개
 | VCF 탐색 | 4를 연속으로 두어 이기는 수순(Victory by Continuous Fours)을 깊이 우선 탐색. 있으면 최우선 추천 |
 | 상대 VCF 차단 | 상대에게 필승 수순이 있으면 그 자리에 가산점 |
 | 한 수 앞 보기 | 상위 후보에 대해 "내가 둔 뒤 상대의 최선 공격"을 계산해 위험한 수를 감점 |
+| 금수 유도 | 4를 만들었을 때 상대가 막을 자리가 **상대의 금수**(3-3·4-4·장목)라 못 막는 수를 필승으로 계산. 공격(주로 백)에서는 노리고, 수비(주로 흑)에서는 미리 막음. 연속 4 수순·깊이 탐색에도 반영 |
 | 규칙(금수) | 흑·백 각각 **6목 이상(장목) / 3-3 / 4-4 금지**를 따로 켜고 끔. [자유룰]·[렌주룰] 버튼으로 한 번에 설정. 금지된 자리는 추천하지 않고, 장목 금지면 6목 이상은 승리로 계산하지 않음 |
 
 ### 3-1. 깊이 탐색 AI — `DeepSearch.java`
@@ -135,6 +136,7 @@ app/src/test/java/com/omokhelper/
 ├── OmokEngineTest.java     엔진 테스트 (5목, 막기, 4-3, VCF, 금수 등)
 ├── BoardDetectorTest.java  가짜 게임 화면으로 인식 테스트
 ├── DeepSearchTest.java     깊이 탐색 테스트
+├── ForbiddenTrapTest.java  금수 유도 테스트
 └── LicenseKeyTest.java     키 확인 테스트 (위조·변조·만료)
 tools/KeyGen.java           키 생성기 (저작권자 PC에서 실행)
 ```

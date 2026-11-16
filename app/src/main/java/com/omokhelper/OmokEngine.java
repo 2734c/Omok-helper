@@ -291,6 +291,31 @@ public final class OmokEngine {
         return s;
     }
 
+    /** p에게 금수 규칙이 하나라도 있는가 */
+    public boolean hasBans(int p) {
+        return rule(p, B_OVERLINE) || rule(p, B_33) || rule(p, B_44);
+    }
+
+    /**
+     * 금수 유도 : p가 (x,y)에 두어 4를 만들었는데, 상대가 막아야 할 자리가 전부 상대의 금수라서 막을 수 없는가.
+     * (예: 렌주룰에서 백이 4를 두었는데, 흑이 막을 자리가 흑의 3-3 자리) → 다음 수에 5목이 되므로 필승.
+     */
+    public boolean forbiddenTrapFour(int x, int y, int p) {
+        int opp = opponent(p);
+        if (!hasBans(opp) || get(x, y) != EMPTY) return false;
+        set(x, y, p);
+        List<int[]> wins = completionCells(x, y, p);
+        boolean trap = !wins.isEmpty();
+        for (int[] w : wins) {
+            if (!isForbidden(w[0], w[1], opp)) {
+                trap = false;
+                break;
+            }
+        }
+        set(x, y, EMPTY);
+        return trap;
+    }
+
     /** 금수(규칙상 둘 수 없는 자리) 여부 : 장목, 3-3, 4-4. 5목이 되는 자리는 금수가 아니다. */
     public boolean isForbidden(int x, int y, int p) {
         if (get(x, y) != EMPTY) return false;
@@ -364,10 +389,16 @@ public final class OmokEngine {
         boolean oppHasFive = false;
         for (int[] c : cands) if (makesFive(c[0], c[1], opp)) oppHasFive = true;
 
+        boolean myTrap = false, threatTrap = false;
+
         // 1) 필승 수순 탐색
         if (!oppHasFive) {
             res.winSequence = findVcf(p, 10, 4000);
-            if (res.winSequence == null) res.threatSequence = findVcf(opp, 10, 4000);
+            myTrap = res.winSequence != null && lastVcfTrap;
+            if (res.winSequence == null) {
+                res.threatSequence = findVcf(opp, 10, 4000);
+                threatTrap = res.threatSequence != null && lastVcfTrap;
+            }
         }
 
         // 2) 모든 후보의 점수 계산
@@ -378,14 +409,21 @@ public final class OmokEngine {
             Shape att = analyze(x, y, p);
             Shape def = isForbidden(x, y, opp) ? new Shape() : analyze(x, y, opp);
             long a = attackScore(att), d = attackScore(def);
+            boolean trapAtt = a < 100_000 && att.fours() > 0 && forbiddenTrapFour(x, y, p);
+            boolean trapDef = d < 100_000 && def.fours() > 0 && forbiddenTrapFour(x, y, opp);
+            if (trapAtt) a = 100_000;
+            if (trapDef) d = 100_000;
             long score = a + d * 8 / 10 + centerBonus(x, y);
             String reason = reasonFor(att, def, a, d);
+            if (trapAtt) reason = "금수 유도 — 상대가 막을 자리가 금수라 못 막음 (필승)";
+            else if (trapDef && a < 100_000) reason = "상대의 금수 유도 차단 (안 막으면 짐)";
 
             if (res.winSequence != null) {
                 int[] first = res.winSequence.get(0);
                 if (first[0] == x && first[1] == y && a < WIN) {
                     score = 900_000;
-                    reason = "필승 수순(연속 4) 시작 — " + (res.winSequence.size() + 1) / 2 + "수 만에 승리";
+                    reason = "필승 수순(연속 4" + (myTrap ? " + 금수 유도" : "") + ") 시작 — "
+                            + (res.winSequence.size() + 1) / 2 + "수 만에 승리";
                 }
             } else if (res.threatSequence != null && a < WIN && d < WIN) {
                 // 상대의 필승 수순에 쓰이는 자리를 막는다 (상대의 첫 수가 가장 중요)
@@ -393,7 +431,7 @@ public final class OmokEngine {
                     int[] t = res.threatSequence.get(i);
                     if (t[0] == x && t[1] == y) {
                         score += i == 0 ? 40_000 : 15_000;
-                        reason = "상대의 필승 수순(연속 4) 차단";
+                        reason = threatTrap ? "상대의 필승 수순(연속 4 + 금수 유도) 차단" : "상대의 필승 수순(연속 4) 차단";
                         break;
                     }
                 }
@@ -558,10 +596,14 @@ public final class OmokEngine {
     public List<int[]> findVcf(int p, int maxDepth, int limit) {
         nodeCount = 0;
         nodeLimit = limit;
+        lastVcfTrap = false;
         int opp = opponent(p);
         for (int[] c : candidates(1)) if (makesFive(c[0], c[1], opp)) return null; // 상대가 먼저 5목
         return vcf(p, maxDepth);
     }
+
+    /** 마지막으로 찾은 VCF 수순이 금수 유도를 포함하는가 */
+    private boolean lastVcfTrap;
 
     private List<int[]> vcf(int p, int depth) {
         if (depth <= 0 || ++nodeCount > nodeLimit) return null;
@@ -591,7 +633,8 @@ public final class OmokEngine {
             } else if (wins.size() == 1) {
                 int[] w = wins.get(0);
                 if (isForbidden(w[0], w[1], opp)) {
-                    // 상대(흑)는 그 자리가 금수라 막을 수 없음 -> 다음 수에 5목
+                    // 상대는 그 자리가 금수라 막을 수 없음 (금수 유도) -> 다음 수에 5목
+                    lastVcfTrap = true;
                     result = new ArrayList<>();
                     result.add(c);
                     result.add(w);

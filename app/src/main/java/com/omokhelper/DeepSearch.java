@@ -89,7 +89,11 @@ public final class DeepSearch {
                 ml.win = true;
                 return ml;
             }
-            long dv = e.isForbidden(x, y, opp) ? 0 : OmokEngine.attackScore(e.analyze(x, y, opp));
+            OmokEngine.Shape d = e.isForbidden(x, y, opp) ? null : e.analyze(x, y, opp);
+            long dv = d == null ? 0 : OmokEngine.attackScore(d);
+            // 금수 유도 : 상대가 막을 자리가 금수인 4는 열린 4처럼 막을 수 없는 수
+            if (a != null && av < 100_000 && a.fours() > 0 && e.forbiddenTrapFour(x, y, p)) av = 100_000;
+            if (d != null && dv < 100_000 && d.fours() > 0 && e.forbiddenTrapFour(x, y, opp)) dv = 100_000;
             if (dv >= OmokEngine.WIN) oppFive = true;
             if (dv >= 100_000) oppBig = true;
             xs[k] = x;
