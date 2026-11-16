@@ -48,7 +48,7 @@ public class MainActivity extends Activity {
         root.setPadding(dp(20), dp(28), dp(20), dp(28));
         scroll.addView(root);
 
-        TextView title = text("5STONE HELPER", 24, 0xFF2B2118, true);
+        TextView title = text("오목 도우미", 26, 0xFF2B2118, true);
         root.addView(title);
         root.addView(text("게임 화면의 바둑판을 감지해서 다음에 둘 좋은 자리를 표시해 줍니다.", 14, 0xFF6B5B4B, false));
 
