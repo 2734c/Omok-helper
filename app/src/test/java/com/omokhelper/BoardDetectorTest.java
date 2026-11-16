@@ -80,6 +80,44 @@ public class BoardDetectorTest {
         runCase(0x7fa86a, 19, 54f);
     }
 
+    /** 오버레이의 추천 고리 + 순위 배지가 캡처에 찍혀도 빈칸이 돌로 오인되지 않아야 한다 */
+    @Test
+    public void overlayMarkersAreNotReadAsStones() {
+        int n = 15;
+        float cell = 66f;
+        int ox = 40, oy = 300;
+        for (float scale : new float[]{0.85f, 1f, 1.25f}) {
+            for (int[] theme : Themes.MARKER_THEMES) {
+                FakeScreen s = new FakeScreen(1080, 2000, 0x223344);
+                s.rect(ox - 30, oy - 30, (int) (ox + cell * (n - 1) + 30), (int) (oy + cell * (n - 1) + 30), 0xdcb35c);
+                for (int i = 0; i < n; i++) {
+                    int p = Math.round(i * cell);
+                    s.rect(ox + p - 1, oy, ox + p + 1, (int) (oy + cell * (n - 1)), 0x3a2a10);
+                    s.rect(ox, oy + p - 1, (int) (ox + cell * (n - 1)), oy + p + 1, 0x3a2a10);
+                }
+                int[][] spots = {{7, 7}, {8, 8}, {3, 4}};
+                for (int k = 0; k < spots.length; k++) {
+                    float cx = ox + spots[k][0] * cell, cy = oy + spots[k][1] * cell;
+                    int color = theme[k] & 0xffffff;
+                    float stroke = cell * scale * (k == 0 ? 0.12f : 0.08f);
+                    float ringR = cell * scale * 0.42f;
+                    ring(s, cx, cy, ringR - stroke / 2, ringR + stroke / 2, color);
+                    s.circle(cx + cell * scale * 0.38f, cy - cell * scale * 0.38f, cell * scale * 0.2f, color);
+                }
+                int[] got = BoardDetector.detect(s, ox, oy, ox + cell * (n - 1), oy + cell * (n - 1), n, null);
+                assertArrayEquals("scale " + scale, new int[n * n], got);
+            }
+        }
+    }
+
+    private static void ring(FakeScreen s, float cx, float cy, float r0, float r1, int c) {
+        for (int y = (int) (cy - r1) - 1; y <= cy + r1 + 1; y++)
+            for (int x = (int) (cx - r1) - 1; x <= cx + r1 + 1; x++) {
+                float d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+                if (d2 >= r0 * r0 && d2 <= r1 * r1) s.px[y * s.w + x] = c;
+            }
+    }
+
     @Test
     public void skippedAreaIsUnknown() {
         FakeScreen s = new FakeScreen(600, 600, 0xdcb35c);

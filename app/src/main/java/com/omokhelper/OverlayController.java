@@ -8,6 +8,9 @@ import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -61,6 +64,13 @@ public final class OverlayController {
     private TextView statusText;
     private Button pauseButton;
     private LinearLayout panelBody;
+    private LinearLayout settingsBox;
+    private TextView title, fold;
+    private GradientDrawable panelBg;
+    private final List<TextView> themedTexts = new ArrayList<>();
+    private final Button[] presetLoad = new Button[Prefs.PRESET_SLOTS];
+    private final Button[] sizeButtons = new Button[3];
+    private Button markerColorButton, panelColorButton;
     private FrameLayout calibLayer;
 
     private boolean paused = false;
@@ -108,6 +118,7 @@ public final class OverlayController {
 
         // 2) 조작 패널
         buildPanel();
+        applyLook();
         wm.addView(panel, panelParams);
         panel.post(this::updatePanelRect);
     }
@@ -151,25 +162,22 @@ public final class OverlayController {
     private void buildPanel() {
         panel = new LinearLayout(ctx);
         panel.setOrientation(LinearLayout.VERTICAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xE6202833);
-        bg.setCornerRadius(dp(14));
-        panel.setBackground(bg);
+        panelBg = new GradientDrawable();
+        panelBg.setCornerRadius(dp(14));
+        panel.setBackground(panelBg);
         panel.setPadding(dp(10), dp(6), dp(10), dp(8));
 
         // 제목줄 (끌어서 이동, 접기)
         LinearLayout titleRow = new LinearLayout(ctx);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = new TextView(ctx);
+        title = new TextView(ctx);
         title.setText("⠿ 오목 도우미");
-        title.setTextColor(0xFFFFD54F);
         title.setTextSize(14);
         title.setPadding(0, dp(4), dp(12), dp(4));
         titleRow.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        TextView fold = new TextView(ctx);
+        fold = new TextView(ctx);
         fold.setText("—");
-        fold.setTextColor(Color.WHITE);
         fold.setTextSize(16);
         fold.setPadding(dp(12), dp(2), dp(4), dp(2));
         titleRow.addView(fold);
@@ -178,8 +186,7 @@ public final class OverlayController {
         panelBody = new LinearLayout(ctx);
         panelBody.setOrientation(LinearLayout.VERTICAL);
         statusText = new TextView(ctx);
-        statusText.setTextColor(Color.WHITE);
-        statusText.setTextSize(13);
+        themedTexts.add(statusText);
         statusText.setMaxWidth(dp(250));
         statusText.setText("화면 감지 준비 완료");
         panelBody.addView(statusText);
@@ -188,12 +195,24 @@ public final class OverlayController {
         buttons.setOrientation(LinearLayout.HORIZONTAL);
         Button calib = smallButton("판 맞추기");
         pauseButton = smallButton("멈춤");
+        Button settings = smallButton("설정");
         Button quit = smallButton("종료");
         buttons.addView(calib);
         buttons.addView(pauseButton);
+        buttons.addView(settings);
         buttons.addView(quit);
         panelBody.addView(buttons);
+        settingsBox = buildSettings();
+        settingsBox.setVisibility(View.GONE);
+        panelBody.addView(settingsBox);
         panel.addView(panelBody);
+
+        settings.setOnClickListener(v -> {
+            boolean open = settingsBox.getVisibility() == View.VISIBLE;
+            settingsBox.setVisibility(open ? View.GONE : View.VISIBLE);
+            if (!open) refreshSettings();
+            panel.post(this::updatePanelRect);
+        });
 
         calib.setOnClickListener(v -> startCalibration());
         pauseButton.setOnClickListener(v -> {
@@ -243,6 +262,155 @@ public final class OverlayController {
                     return false;
             }
         });
+    }
+
+    // ------------------------------------------------------------------ 패널 설정 (프리셋, 크기, 색)
+
+    private TextView settingsLabel(String s) {
+        TextView t = new TextView(ctx);
+        t.setText(s);
+        t.setTextSize(12);
+        t.setPadding(0, dp(8), 0, 0);
+        themedTexts.add(t);
+        return t;
+    }
+
+    private LinearLayout row() {
+        LinearLayout r = new LinearLayout(ctx);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        return r;
+    }
+
+    private LinearLayout buildSettings() {
+        LinearLayout box = new LinearLayout(ctx);
+        box.setOrientation(LinearLayout.VERTICAL);
+
+        // 판 프리셋
+        box.addView(settingsLabel("판 프리셋 — 번호를 누르면 불러오기"));
+        LinearLayout loadRow = row();
+        LinearLayout saveRow = row();
+        for (int i = 0; i < Prefs.PRESET_SLOTS; i++) {
+            final int slot = i + 1;
+            presetLoad[i] = smallButton(String.valueOf(slot));
+            presetLoad[i].setOnClickListener(v -> loadPreset(slot));
+            loadRow.addView(presetLoad[i]);
+            Button save = smallButton("저장 " + slot);
+            save.setOnClickListener(v -> savePreset(slot));
+            saveRow.addView(save);
+        }
+        box.addView(loadRow);
+        box.addView(saveRow);
+
+        // 표시 크기
+        box.addView(settingsLabel("표시 크기"));
+        LinearLayout sizeRow = row();
+        String[] sizeNames = {"작게", "보통", "크게"};
+        for (int i = 0; i < 3; i++) {
+            final int idx = i;
+            sizeButtons[i] = smallButton(sizeNames[i]);
+            sizeButtons[i].setOnClickListener(v -> {
+                Prefs p = Prefs.load(ctx);
+                p.displaySize = idx;
+                p.save(ctx);
+                applyLook();
+                refreshSettings();
+                panel.post(this::updatePanelRect);
+            });
+            sizeRow.addView(sizeButtons[i]);
+        }
+        box.addView(sizeRow);
+
+        // 색 (누를 때마다 다음 색)
+        box.addView(settingsLabel("색 — 누를 때마다 바뀜"));
+        markerColorButton = smallButton("");
+        markerColorButton.setOnClickListener(v -> {
+            Prefs p = Prefs.load(ctx);
+            p.markerTheme = (p.markerTheme + 1) % Themes.MARKER_THEMES.length;
+            p.save(ctx);
+            applyLook();
+            refreshSettings();
+        });
+        panelColorButton = smallButton("");
+        panelColorButton.setOnClickListener(v -> {
+            Prefs p = Prefs.load(ctx);
+            p.panelTheme = (p.panelTheme + 1) % Themes.PANEL_THEMES.length;
+            p.save(ctx);
+            applyLook();
+            refreshSettings();
+        });
+        box.addView(markerColorButton);
+        box.addView(panelColorButton);
+        return box;
+    }
+
+    private void loadPreset(int slot) {
+        Prefs p = Prefs.load(ctx);
+        if (!p.loadPreset(ctx, slot)) {
+            setStatus("프리셋 " + slot + "이(가) 비어 있어요.\n[판 맞추기] 후 [저장 " + slot + "]을 눌러 저장하세요.");
+            return;
+        }
+        if (markerView != null) markerView.setMarkers(new ArrayList<>(), 0);
+        listener.onCalibrationChanged();
+        setStatus("프리셋 " + slot + " 불러옴 (" + p.boardSize + "×" + p.boardSize + ") — 감지 중…");
+    }
+
+    private void savePreset(int slot) {
+        Prefs p = Prefs.load(ctx);
+        if (!p.savePreset(ctx, slot)) {
+            setStatus("먼저 [판 맞추기]로 바둑판 위치를 맞춰 주세요.");
+            return;
+        }
+        refreshSettings();
+        setStatus("지금 바둑판 위치(" + p.boardSize + "×" + p.boardSize + ")를 프리셋 " + slot + "에 저장했어요.");
+    }
+
+    /** 설정 버튼들의 글자를 현재 값에 맞게 갱신 */
+    private void refreshSettings() {
+        Prefs p = Prefs.load(ctx);
+        for (int i = 0; i < Prefs.PRESET_SLOTS; i++) {
+            String label = Prefs.presetLabel(ctx, i + 1);
+            presetLoad[i].setText((i + 1) + (label == null ? " (비어 있음)" : " (" + label + ")"));
+        }
+        String[] sizeNames = {"작게", "보통", "크게"};
+        for (int i = 0; i < 3; i++) sizeButtons[i].setText((i == p.displaySize ? "✓ " : "") + sizeNames[i]);
+
+        // 추천 색 : 색 점 3개로 미리보기
+        int[] mc = Themes.MARKER_THEMES[p.markerTheme % Themes.MARKER_THEMES.length];
+        SpannableStringBuilder sb = new SpannableStringBuilder("추천 색  ");
+        for (int i = 0; i < 3; i++) {
+            int start = sb.length();
+            sb.append("●");
+            sb.setSpan(new ForegroundColorSpan(mc[i]), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        sb.append("  ").append(Themes.MARKER_THEME_NAMES[p.markerTheme % Themes.MARKER_THEMES.length]).append(" ▸");
+        markerColorButton.setText(sb);
+        panelColorButton.setText("패널 색  " + Themes.PANEL_THEME_NAMES[p.panelTheme % Themes.PANEL_THEMES.length] + " ▸");
+    }
+
+    /** 저장된 색·크기 설정을 패널과 추천 표시에 적용 */
+    private void applyLook() {
+        Prefs p = Prefs.load(ctx);
+        int[] pc = Themes.PANEL_THEMES[p.panelTheme % Themes.PANEL_THEMES.length];
+        if (panelBg != null) panelBg.setColor(pc[0]);
+        float scale = p.sizeScale();
+        if (title != null) {
+            title.setTextColor(pc[2]);
+            title.setTextSize(14 * scale);
+        }
+        if (fold != null) {
+            fold.setTextColor(pc[1]);
+            fold.setTextSize(16 * scale);
+        }
+        for (TextView t : themedTexts) t.setTextColor(pc[1]);
+        if (statusText != null) {
+            statusText.setTextSize(13 * scale);
+            statusText.setMaxWidth(dp(250 * scale));
+        }
+        if (markerView != null) {
+            markerView.colors = Themes.MARKER_THEMES[p.markerTheme % Themes.MARKER_THEMES.length];
+            markerView.scale = scale;
+            markerView.invalidate();
+        }
     }
 
     private Button smallButton(String text) {
@@ -484,9 +652,16 @@ public final class OverlayController {
      * 주의 : 이 창도 화면 캡처에 같이 찍히므로, 돌 인식에 쓰는 교차점 한가운데(반지름 0.26칸)는 비워 두고
      *        바깥쪽 고리와 모서리 숫자만 그린다.
      */
+    private static boolean isLight(int c) {
+        int r = (c >> 16) & 0xff, g = (c >> 8) & 0xff, b = c & 0xff;
+        return 0.299 * r + 0.587 * g + 0.114 * b > 160;
+    }
+
     private static final class MarkerView extends View {
         private List<Marker> markers = new ArrayList<>();
         private float cell;
+        int[] colors = Themes.MARKER_THEMES[0];
+        float scale = 1f; // 0.85 ~ 1.25 : 이 범위에서는 돌 인식 영역(반지름 0.26칸)을 가리지 않는다
         private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint textBg = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -513,17 +688,18 @@ public final class OverlayController {
             for (int i = markers.size() - 1; i >= 0; i--) {
                 Marker m = markers.get(i);
                 float x = m.x - loc[0], y = m.y - loc[1];
-                int color = m.winning ? 0xFFFF1744 : (m.rank == 1 ? 0xFFFF3D00 : (m.rank == 2 ? 0xFFFFAB00 : 0xFF00B0FF));
+                int color = m.winning ? colors[3] : (m.rank == 1 ? colors[0] : (m.rank == 2 ? colors[1] : colors[2]));
                 ring.setColor(color);
-                ring.setStrokeWidth(Math.max(3f, cell * (m.rank == 1 ? 0.12f : 0.08f)));
-                c.drawCircle(x, y, cell * 0.42f, ring);
+                ring.setStrokeWidth(Math.max(3f, cell * scale * (m.rank == 1 ? 0.12f : 0.08f)));
+                c.drawCircle(x, y, cell * scale * 0.42f, ring);
 
                 // 순위 숫자 (오른쪽 위 바깥)
-                float r = cell * 0.2f;
-                float bx = x + cell * 0.38f, by = y - cell * 0.38f;
+                float r = cell * scale * 0.2f;
+                float bx = x + cell * scale * 0.38f, by = y - cell * scale * 0.38f;
                 textBg.setColor(color);
                 c.drawCircle(bx, by, r, textBg);
                 text.setTextSize(r * 1.4f);
+                text.setColor(isLight(color) ? Color.BLACK : Color.WHITE);
                 c.drawText(String.valueOf(m.rank), bx, by + r * 0.5f, text);
             }
         }

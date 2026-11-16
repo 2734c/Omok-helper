@@ -35,6 +35,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+    }
+
+    /** 화면을 만든다. 패널에서 프리셋을 불러와 설정이 바뀌었을 수 있으므로 돌아올 때마다 새로 만든다. */
+    private void buildUi() {
         prefs = Prefs.load(this);
 
         ScrollView scroll = new ScrollView(this);
@@ -108,7 +112,12 @@ public class MainActivity extends Activity {
                         + "4. 오목 게임을 열고, 떠 있는 패널의 [판 맞추기]를 누릅니다.\n"
                         + "5. 바둑판의 맨 왼쪽 위 교차점, 맨 오른쪽 아래 교차점을 차례로 맞추고 [저장].\n"
                         + "6. 이제 돌이 놓일 때마다 추천 자리에 고리가 표시됩니다.\n"
-                        + "   빨강 = 1순위, 주황 = 2순위, 파랑 = 3순위 이하\n\n"
+                        + "   (기본 색) 빨강 = 1순위, 주황 = 2순위, 파랑 = 3순위 이하\n\n"
+                        + "• 패널의 [설정]에서 바꿀 수 있는 것\n"
+                        + "  - 판 프리셋: [저장 1~3]으로 지금 바둑판 위치·크기를 저장하고,\n"
+                        + "    [1~3]을 누르면 바로 불러옵니다. (게임마다, 화면 배치마다 저장)\n"
+                        + "  - 표시 크기: 작게 / 보통 / 크게\n"
+                        + "  - 추천 색, 패널 색: 누를 때마다 다음 색으로 바뀝니다.\n"
                         + "• 세로 화면 기준입니다. 화면을 돌리면 [판 맞추기]를 다시 하세요.\n"
                         + "• 패널은 제목줄을 끌어서 바둑판 밖으로 옮겨 두세요.\n"
                         + "• 연습·AI 대전·모의 테스트용입니다. 사람과 하는 온라인 대국에서 사용하면\n"
@@ -121,20 +130,15 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        buildUi();
         boolean ok = Settings.canDrawOverlays(this);
         overlayState.setText(ok ? "✓ 다른 앱 위에 표시 권한: 허용됨" : "✗ 다른 앱 위에 표시 권한: 필요함");
         overlayState.setTextColor(ok ? 0xFF2E7D32 : 0xFFB71C1C);
         startButton.setText(CaptureService.running ? "② 화면 감지 중 (다시 시작)" : "② 화면 감지 시작");
     }
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-        prefs.save(this);
-    }
-
     private void startDetection() {
-        prefs.save(this);
+        prefs.saveSettings(this);
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "먼저 '다른 앱 위에 표시' 권한을 허용해 주세요", Toast.LENGTH_LONG).show();
             return;
@@ -223,7 +227,7 @@ public class MainActivity extends Activity {
             b.setOnCheckedChangeListener((btn, isChecked) -> {
                 if (isChecked) {
                     onPick.pick(idx);
-                    prefs.save(this);
+                    prefs.saveSettings(this);
                 }
             });
             g.addView(b);
