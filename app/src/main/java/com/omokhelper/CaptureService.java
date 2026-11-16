@@ -44,7 +44,7 @@ public class CaptureService extends Service implements OverlayController.Listene
     public static final String EXTRA_CODE = "code";
     public static final String EXTRA_DATA = "data";
 
-    private static final String TAG = "OmokHelper";
+    private static final String TAG = "5StoneHelper";
     private static final String CHANNEL = "capture";
     private static final long INTERVAL_MS = 600;
 
@@ -122,7 +122,7 @@ public class CaptureService extends Service implements OverlayController.Listene
 
         Notification n = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat)
-                .setContentTitle("오목 도우미")
+                .setContentTitle("5STONE HELPER")
                 .setContentText("화면을 감지하는 중입니다")
                 .setContentIntent(openPi)
                 .addAction(new Notification.Action.Builder(null, "중지", stopPi).build())

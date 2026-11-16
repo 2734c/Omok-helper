@@ -178,7 +178,7 @@ public final class OverlayController {
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
         title = new TextView(ctx);
-        title.setText("⠿ 오목 도우미");
+        title.setText("⠿ 5STONE HELPER");
         title.setTextSize(14);
         title.setPadding(0, dp(4), dp(12), dp(4));
         titleRow.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));

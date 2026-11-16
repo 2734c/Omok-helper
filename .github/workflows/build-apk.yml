@@ -22,13 +22,13 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon testDebugUnitTest assembleRelease
-          cp app/build/outputs/apk/release/app-release.apk OmokHelper.apk
+          cp app/build/outputs/apk/release/app-release.apk 5StoneHelper.apk
 
       - name: 빌드 결과 업로드 (Actions 탭에서 다운로드)
         uses: actions/upload-artifact@v4
         with:
-          name: OmokHelper-apk
-          path: OmokHelper.apk
+          name: 5StoneHelper-apk
+          path: 5StoneHelper.apk
 
       - name: 최신 APK 릴리스 갱신 (휴대폰에서 바로 다운로드)
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
@@ -36,7 +36,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest OmokHelper.apk \
-            --title "오목 도우미 최신 APK" \
+          gh release create latest 5StoneHelper.apk \
+            --title "5STONE HELPER 최신 APK" \
             --notes "브랜치 ${{ github.ref_name }} / 커밋 ${{ github.sha }} 에서 자동 빌드되었습니다." \
             --target ${{ github.sha }}
