@@ -316,6 +316,11 @@ public class CaptureService extends Service implements OverlayController.Listene
     }
 
     @Override
+    public void onSettingsChanged() {
+        forceUpdate = true;
+    }
+
+    @Override
     public void onPauseChanged(boolean paused) {
         this.paused = paused;
         forceUpdate = true;

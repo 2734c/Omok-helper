@@ -35,6 +35,9 @@ public final class OverlayController {
     public interface Listener {
         void onCalibrationChanged();
 
+        /** 내 돌 색처럼 분석 결과에 영향을 주는 설정이 바뀜 */
+        void onSettingsChanged();
+
         void onPauseChanged(boolean paused);
 
         void onQuit();
@@ -70,6 +73,9 @@ public final class OverlayController {
     private final List<TextView> themedTexts = new ArrayList<>();
     private final Button[] presetLoad = new Button[Prefs.PRESET_SLOTS];
     private final Button[] sizeButtons = new Button[3];
+    private final Button[] colorButtons = new Button[3];
+    private TextView colorChip;
+    private static final String[] MY_COLOR_NAMES = {"자동", "흑", "백"};
     private Button markerColorButton, panelColorButton;
     private FrameLayout calibLayer;
 
@@ -176,6 +182,14 @@ public final class OverlayController {
         title.setTextSize(14);
         title.setPadding(0, dp(4), dp(12), dp(4));
         titleRow.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        // 내 돌 색 칩 : 누를 때마다 자동 → 흑 → 백
+        colorChip = new TextView(ctx);
+        colorChip.setTextSize(12);
+        colorChip.setPadding(dp(10), dp(3), dp(10), dp(3));
+        colorChip.setOnClickListener(v -> setMyColor((Prefs.load(ctx).myColor + 1) % 3));
+        titleRow.addView(colorChip);
+
         fold = new TextView(ctx);
         fold.setText("—");
         fold.setTextSize(16);
@@ -285,6 +299,17 @@ public final class OverlayController {
         LinearLayout box = new LinearLayout(ctx);
         box.setOrientation(LinearLayout.VERTICAL);
 
+        // 내 돌 색
+        box.addView(settingsLabel("내 돌 (추천을 받을 쪽)"));
+        LinearLayout colorRow = row();
+        for (int i = 0; i < 3; i++) {
+            final int idx = i;
+            colorButtons[i] = smallButton(MY_COLOR_NAMES[i]);
+            colorButtons[i].setOnClickListener(v -> setMyColor(idx));
+            colorRow.addView(colorButtons[i]);
+        }
+        box.addView(colorRow);
+
         // 판 프리셋
         box.addView(settingsLabel("판 프리셋 — 번호를 누르면 불러오기"));
         LinearLayout loadRow = row();
@@ -343,6 +368,41 @@ public final class OverlayController {
         return box;
     }
 
+    /** 내 돌 색 변경 : 0 = 자동(차례인 쪽), 1 = 흑, 2 = 백 */
+    private void setMyColor(int c) {
+        Prefs p = Prefs.load(ctx);
+        p.myColor = c;
+        p.save(ctx);
+        updateColorChip();
+        if (settingsBox != null && settingsBox.getVisibility() == View.VISIBLE) refreshSettings();
+        if (markerView != null) markerView.setMarkers(new ArrayList<>(), 0);
+        setStatus(c == 0 ? "내 돌: 자동 — 차례인 쪽의 추천을 보여 줘요."
+                : "내 돌: " + MY_COLOR_NAMES[c] + " — " + MY_COLOR_NAMES[c] + " 차례에만 추천을 보여 줘요.");
+        listener.onSettingsChanged();
+        panel.post(this::updatePanelRect);
+    }
+
+    private void updateColorChip() {
+        if (colorChip == null) return;
+        int c = Prefs.load(ctx).myColor;
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(10));
+        if (c == 1) {
+            bg.setColor(0xFF111111);
+            bg.setStroke(dp(1), 0xFF9E9E9E);
+            colorChip.setTextColor(Color.WHITE);
+        } else if (c == 2) {
+            bg.setColor(0xFFFAFAFA);
+            bg.setStroke(dp(1), 0xFF616161);
+            colorChip.setTextColor(0xFF111111);
+        } else {
+            bg.setColor(0xFF607D8B);
+            colorChip.setTextColor(Color.WHITE);
+        }
+        colorChip.setBackground(bg);
+        colorChip.setText("나: " + MY_COLOR_NAMES[c] + " ⇄");
+    }
+
     private void loadPreset(int slot) {
         Prefs p = Prefs.load(ctx);
         if (!p.loadPreset(ctx, slot)) {
@@ -373,6 +433,7 @@ public final class OverlayController {
         }
         String[] sizeNames = {"작게", "보통", "크게"};
         for (int i = 0; i < 3; i++) sizeButtons[i].setText((i == p.displaySize ? "✓ " : "") + sizeNames[i]);
+        for (int i = 0; i < 3; i++) colorButtons[i].setText((i == p.myColor ? "✓ " : "") + MY_COLOR_NAMES[i]);
 
         // 추천 색 : 색 점 3개로 미리보기
         int[] mc = Themes.MARKER_THEMES[p.markerTheme % Themes.MARKER_THEMES.length];
@@ -406,6 +467,8 @@ public final class OverlayController {
             statusText.setTextSize(13 * scale);
             statusText.setMaxWidth(dp(250 * scale));
         }
+        updateColorChip();
+        if (colorChip != null) colorChip.setTextSize(12 * scale);
         if (markerView != null) {
             markerView.colors = Themes.MARKER_THEMES[p.markerTheme % Themes.MARKER_THEMES.length];
             markerView.scale = scale;
