@@ -70,6 +70,10 @@ public class MainActivity extends Activity {
         card.addView(radios(new String[]{"1개", "3개", "5개"}, topIdx,
                 i -> prefs.topN = i == 0 ? 1 : (i == 2 ? 5 : 3)));
 
+        card.addView(label("AI 생각 시간 (길수록 더 깊게 읽음)"));
+        card.addView(radios(new String[]{"0.5초", "1.5초", "3초"}, prefs.thinkLevel,
+                i -> prefs.thinkLevel = i));
+
         // ---------------- 시작
         root.addView(section("시작하기"));
         LinearLayout card2 = card();

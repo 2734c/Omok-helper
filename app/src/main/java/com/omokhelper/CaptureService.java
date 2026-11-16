@@ -265,7 +265,7 @@ public class CaptureService extends Service implements OverlayController.Listene
             return;
         }
 
-        OmokEngine.Result r = engine.recommend(side, p.topN);
+        OmokEngine.Result r = engine.recommendDeep(side, p.topN, p.thinkMs());
         List<OverlayController.Marker> markers = new ArrayList<>();
         StringBuilder sb = new StringBuilder();
         sb.append(colorName(side)).append(" 차례 추천 (").append(counts).append(")\n");
@@ -282,8 +282,20 @@ public class CaptureService extends Service implements OverlayController.Listene
                 if (i > 0) sb.append(" → ");
                 sb.append(engine.coord(c[0], c[1]));
             }
-        } else if (r.threatSequence != null) {
-            sb.append("⚠ 상대에게 연속 4 필승 수순이 있어요!");
+        } else {
+            if (r.pv != null && r.pv.size() > 1) {
+                sb.append("예상 수순: ");
+                for (int i = 0; i < r.pv.size() && i < 7; i++) {
+                    int[] c = r.pv.get(i);
+                    if (i > 0) sb.append(" → ");
+                    sb.append(engine.coord(c[0], c[1]));
+                }
+                sb.append('\n');
+            }
+            if (r.searchDepth > 0) {
+                sb.append(r.searchDepth).append("수 앞까지 탐색 (").append(r.searchNodes).append("개 판 검토)\n");
+            }
+            if (r.threatSequence != null) sb.append("⚠ 상대에게 연속 4 필승 수순이 있어요!");
         }
         String status = sb.toString().trim();
         main.post(() -> overlay.showResult(markers, cell, status));

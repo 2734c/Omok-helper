@@ -50,11 +50,31 @@ public final class OmokEngine {
     }
 
     public void set(int x, int y, int v) {
-        cells[y * size + x] = v;
+        int i = y * size + x;
+        int old = cells[i];
+        if (old == BLACK || old == WHITE) hash ^= ZOBRIST[old - 1][i];
+        if (v == BLACK || v == WHITE) hash ^= ZOBRIST[v - 1][i];
+        cells[i] = v;
     }
 
     public void load(int[] board) {
-        System.arraycopy(board, 0, cells, 0, cells.length);
+        for (int i = 0; i < cells.length; i++) set(i % size, i / size, board[i]);
+    }
+
+    // ---------------------------------------------------------------- 판 해시 (Zobrist)
+    // 판 모양마다 거의 겹치지 않는 64비트 번호. 깊이 탐색에서 "이미 계산한 판"을 기억하는 데 쓴다.
+
+    private static final long[][] ZOBRIST = new long[2][19 * 19];
+
+    static {
+        java.util.Random r = new java.util.Random(20261116L);
+        for (int c = 0; c < 2; c++) for (int i = 0; i < 19 * 19; i++) ZOBRIST[c][i] = r.nextLong();
+    }
+
+    private long hash = 0;
+
+    public long hash() {
+        return hash;
     }
 
     public static int opponent(int p) {
@@ -109,18 +129,10 @@ public final class OmokEngine {
 
     // ---------------------------------------------------------------- 줄 모양 분석
 
-    /**
-     * (x,y)를 중심으로 길이 11의 줄을 만든다.
-     * 1 = 내 돌, 0 = 빈칸, 2 = 막힘(상대 돌이나 판 밖). 가운데(5번)는 내 돌로 가정한다.
+    /*
+     * 한 줄은 길이 11의 배열로 나타낸다 (가운데 5번이 지금 놓는 돌).
+     * 1 = 내 돌, 0 = 빈칸, 2 = 막힘(상대 돌이나 판 밖).
      */
-    private int[] line(int x, int y, int dx, int dy, int p) {
-        int[] a = new int[11];
-        for (int k = -5; k <= 5; k++) {
-            int v = k == 0 ? p : get(x + k * dx, y + k * dy);
-            a[k + 5] = v == p ? 1 : (v == EMPTY ? 0 : 2);
-        }
-        return a;
-    }
 
     /** 가운데 돌을 포함하는 연속된 돌의 길이 */
     private static int centerRun(int[] a) {
@@ -199,11 +211,45 @@ public final class OmokEngine {
         }
     }
 
+    // 줄 모양 계산은 느리므로, 줄(가운데 제외 10칸, 각 칸 3가지 = 3^10 가지)마다 결과를 한 번만 계산해 저장한다.
+    private static final byte[][] TYPE_CACHE = new byte[2][59049];
+
+    private static int cachedType(int code, boolean exact) {
+        byte[] t = TYPE_CACHE[exact ? 1 : 0];
+        int v = t[code];
+        if (v != 0) return v - 1;
+        int[] a = new int[11];
+        int c = code;
+        for (int i = 0; i < 11; i++) {
+            if (i == 5) {
+                a[i] = 1;
+                continue;
+            }
+            a[i] = c % 3;
+            c /= 3;
+        }
+        int type = lineType(a, exact);
+        t[code] = (byte) (type + 1);
+        return type;
+    }
+
+    /** (x,y) 중심 줄을 3진수 번호로 바꾼다 (가운데 칸 제외) */
+    private int lineCode(int x, int y, int dx, int dy, int p) {
+        int code = 0, mul = 1;
+        for (int k = -5; k <= 5; k++) {
+            if (k == 0) continue;
+            int v = get(x + k * dx, y + k * dy);
+            code += (v == p ? 1 : (v == EMPTY ? 0 : 2)) * mul;
+            mul *= 3;
+        }
+        return code;
+    }
+
     public Shape analyze(int x, int y, int p) {
         Shape s = new Shape();
         boolean ex = exact(p);
         for (int[] d : DIRS) {
-            switch (lineType(line(x, y, d[0], d[1], p), ex)) {
+            switch (cachedType(lineCode(x, y, d[0], d[1], p), ex)) {
                 case T_FIVE: s.five++; break;
                 case T_OVERLINE: s.overline++; break;
                 case T_OPEN_FOUR: s.openFour++; break;
@@ -265,6 +311,9 @@ public final class OmokEngine {
         public final List<Move> moves = new ArrayList<>();
         public List<int[]> winSequence;          // 내 필승 수순 (없으면 null)
         public List<int[]> threatSequence;       // 상대의 필승 수순 (없으면 null)
+        public List<int[]> pv;                   // 깊이 탐색의 예상 수순 (없으면 null)
+        public int searchDepth;                  // 깊이 탐색으로 읽은 수 (0 = 탐색 안 함)
+        public int searchNodes;                  // 검토한 판의 수
     }
 
     // ---------------------------------------------------------------- 추천
@@ -346,6 +395,44 @@ public final class OmokEngine {
         return res;
     }
 
+    /**
+     * 깊이 탐색 추천.
+     * 바로 이기는 수 / 5목 막기 / 연속 4 필승처럼 답이 정해진 상황은 빠른 분석 결과를 그대로 쓰고,
+     * 그 밖에는 DeepSearch(알파-베타)로 timeMs 동안 여러 수 앞을 읽어 순위를 정한다.
+     */
+    public Result recommendDeep(int p, int topN, long timeMs) {
+        Result base = recommend(p, 30);
+        boolean decided = base.moves.isEmpty() || base.winSequence != null
+                || base.moves.get(0).score >= 800_000 || candidates(2).isEmpty();
+        if (decided) {
+            while (base.moves.size() > topN) base.moves.remove(base.moves.size() - 1);
+            return base;
+        }
+
+        DeepSearch.Outcome o = new DeepSearch(this).run(p, timeMs, 20);
+        Result res = new Result();
+        res.player = p;
+        res.threatSequence = base.threatSequence;
+        res.searchDepth = o.depth;
+        res.searchNodes = o.nodes;
+        res.pv = o.pv;
+        int opp = opponent(p);
+        for (DeepSearch.RootMove rm : o.moves) {
+            if (res.moves.size() >= topN) break;
+            String reason = null;
+            for (Move m : base.moves) if (m.x == rm.x && m.y == rm.y) reason = m.reason;
+            if (reason == null) {
+                Shape att = analyze(rm.x, rm.y, p);
+                Shape def = isForbidden(rm.x, rm.y, opp) ? new Shape() : analyze(rm.x, rm.y, opp);
+                reason = reasonFor(att, def, attackScore(att), attackScore(def));
+            }
+            String deep = DeepSearch.describe(rm.value);
+            if (deep != null) reason = deep + " · " + reason;
+            res.moves.add(new Move(rm.x, rm.y, rm.value, reason));
+        }
+        return res;
+    }
+
     /** 이미 놓인 (x,y)의 돌이 4(5목 직전)를 만들었는가 */
     private boolean analyzeStone(int x, int y, int p) {
         set(x, y, EMPTY);
@@ -354,12 +441,12 @@ public final class OmokEngine {
         return s.fours() > 0;
     }
 
-    private long centerBonus(int x, int y) {
+    long centerBonus(int x, int y) {
         int c = size / 2;
         return Math.max(0, 8 - (Math.abs(x - c) + Math.abs(y - c)) / 2);
     }
 
-    private static String reasonFor(Shape att, Shape def, long a, long d) {
+    static String reasonFor(Shape att, Shape def, long a, long d) {
         if (a >= WIN) return "5목 완성 — 바로 승리!";
         if (d >= WIN) return "상대의 5목을 막아야 합니다";
         if (att.openFour > 0) return "열린 4 — 막을 수 없는 필승";
@@ -384,7 +471,7 @@ public final class OmokEngine {
     }
 
     /** 돌이 있는 곳에서 거리 dist 이내의 빈칸들 */
-    private List<int[]> candidates(int dist) {
+    List<int[]> candidates(int dist) {
         List<int[]> list = new ArrayList<>();
         for (int y = 0; y < size; y++) {
             for (int x = 0; x < size; x++) {
