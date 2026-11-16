@@ -29,17 +29,44 @@ public final class OmokEngine {
     static final int T_NONE = 0, T_TWO = 1, T_OPEN_TWO = 2, T_THREE = 3, T_OPEN_THREE = 4,
             T_FOUR = 5, T_OPEN_FOUR = 6, T_FIVE = 7, T_OVERLINE = 8;
 
+    // ---------------------------------------------------------------- 규칙 (항목별로 켜고 끔)
+    public static final int B_OVERLINE = 1;  // 흑 6목 이상(장목) 금지 : 승리로 치지 않고, 그 자리에 둘 수 없음
+    public static final int B_33 = 2;        // 흑 3-3 금지
+    public static final int B_44 = 4;        // 흑 4-4 금지
+    public static final int W_OVERLINE = 8;  // 백 6목 이상 금지
+    public static final int W_33 = 16;       // 백 3-3 금지
+    public static final int W_44 = 32;       // 백 4-4 금지
+    public static final int RULE_FREE = 0;
+    public static final int RULE_RENJU = B_OVERLINE | B_33 | B_44;
+
     public final int size;
-    public final boolean renju;
+    public final int rules;
     private final int[] cells;
 
     private int nodeCount;
     private int nodeLimit;
 
-    public OmokEngine(int size, boolean renju) {
+    public OmokEngine(int size, int rules) {
         this.size = size;
-        this.renju = renju;
+        this.rules = rules;
         this.cells = new int[size * size];
+    }
+
+    /** renju = true 이면 렌주룰, false 이면 자유룰 */
+    public OmokEngine(int size, boolean renju) {
+        this(size, renju ? RULE_RENJU : RULE_FREE);
+    }
+
+    private boolean rule(int p, int blackFlag) {
+        int flag = p == BLACK ? blackFlag : blackFlag << 3; // 백 규칙은 흑 규칙의 3비트 위
+        return (rules & flag) != 0;
+    }
+
+    /** 규칙 이름 (화면 표시용) */
+    public static String ruleName(int rules) {
+        if (rules == RULE_FREE) return "자유룰";
+        if (rules == RULE_RENJU) return "렌주룰";
+        return "사용자 규칙";
     }
 
     // ---------------------------------------------------------------- 판 조작
@@ -93,7 +120,7 @@ public final class OmokEngine {
     }
 
     private boolean exact(int p) {
-        return renju && p == BLACK; // 렌주룰의 흑은 정확히 5개만 승리
+        return rule(p, B_OVERLINE); // 장목 금지면 정확히 5개만 승리
     }
 
     // ---------------------------------------------------------------- 5목 판정
@@ -264,13 +291,16 @@ public final class OmokEngine {
         return s;
     }
 
-    /** 렌주룰 흑 금수(3-3, 4-4, 장목) 여부. 5목이 되는 자리는 금수가 아니다. */
+    /** 금수(규칙상 둘 수 없는 자리) 여부 : 장목, 3-3, 4-4. 5목이 되는 자리는 금수가 아니다. */
     public boolean isForbidden(int x, int y, int p) {
-        if (!renju || p != BLACK || get(x, y) != EMPTY) return false;
-        if (makesFive(x, y, BLACK)) return false;
-        if (makesOverline(x, y, BLACK)) return true;
-        Shape s = analyze(x, y, BLACK);
-        return s.fours() >= 2 || s.openThree >= 2;
+        if (get(x, y) != EMPTY) return false;
+        boolean ban6 = rule(p, B_OVERLINE), ban33 = rule(p, B_33), ban44 = rule(p, B_44);
+        if (!ban6 && !ban33 && !ban44) return false;
+        if (makesFive(x, y, p)) return false;
+        if (ban6 && makesOverline(x, y, p)) return true;
+        if (!ban33 && !ban44) return false;
+        Shape s = analyze(x, y, p);
+        return (ban44 && s.fours() >= 2) || (ban33 && s.openThree >= 2);
     }
 
     // ---------------------------------------------------------------- 점수

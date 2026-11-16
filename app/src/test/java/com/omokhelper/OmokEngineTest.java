@@ -178,6 +178,68 @@ public class OmokEngineTest {
         assertTrue(free.makesFive(5, 1, OmokEngine.BLACK));
     }
 
+    static OmokEngine board(int rules, String... rows) {
+        OmokEngine e = new OmokEngine(15, rules);
+        for (int y = 0; y < rows.length; y++) {
+            for (int x = 0; x < rows[y].length(); x++) {
+                char ch = rows[y].charAt(x);
+                if (ch == 'X') e.set(x, y, OmokEngine.BLACK);
+                if (ch == 'O') e.set(x, y, OmokEngine.WHITE);
+            }
+        }
+        return e;
+    }
+
+    /** 흑 장목만 금지 (3-3은 허용) : 6목 자리는 추천하지 않고, 백도 막을 필요가 없다 */
+    @Test
+    public void blackOverlineOnlyRule() {
+        String[] pos = {
+                "...............",
+                "...............",
+                "..XXX.XX.......",
+                "...O.O.........",
+                "....O.O..O.....",
+                "...........O..."};
+        OmokEngine e = board(OmokEngine.B_OVERLINE, pos);
+        assertTrue(e.isForbidden(5, 2, OmokEngine.BLACK));
+        assertFalse(e.makesFive(5, 2, OmokEngine.BLACK));
+        for (OmokEngine.Move m : e.recommend(OmokEngine.BLACK, 5).moves)
+            assertFalse("black must not play overline", m.x == 5 && m.y == 2);
+        for (OmokEngine.Move m : e.recommendDeep(OmokEngine.BLACK, 5, 200).moves)
+            assertFalse("black must not play overline (deep)", m.x == 5 && m.y == 2);
+        OmokEngine.Move w = e.recommend(OmokEngine.WHITE, 1).moves.get(0);
+        assertFalse("white need not block a dead overline", w.reason.contains("5목을 막아야"));
+
+        // 같은 규칙에서 3-3은 허용
+        OmokEngine f = board(OmokEngine.B_OVERLINE,
+                "...............",
+                "...............",
+                "...............",
+                "...............",
+                ".......X.......",
+                ".......X.......",
+                ".....XX........");
+        assertFalse(f.isForbidden(7, 6, OmokEngine.BLACK));
+    }
+
+    @Test
+    public void whiteRulesApplyToWhite() {
+        OmokEngine e = board(OmokEngine.W_OVERLINE | OmokEngine.W_33,
+                "...............",
+                "..OOO.OO.......",
+                "...............",
+                "...............",
+                ".......O.......",
+                ".......O.......",
+                ".....OO........");
+        assertTrue(e.isForbidden(5, 1, OmokEngine.WHITE));   // 백 장목
+        assertTrue(e.isForbidden(7, 6, OmokEngine.WHITE));   // 백 3-3
+        assertFalse(e.isForbidden(5, 1, OmokEngine.BLACK));  // 흑에게는 규칙 없음
+        assertEquals("사용자 규칙", OmokEngine.ruleName(e.rules));
+        assertEquals("렌주룰", OmokEngine.ruleName(OmokEngine.RULE_RENJU));
+        assertEquals("자유룰", OmokEngine.ruleName(OmokEngine.RULE_FREE));
+    }
+
     @Test
     public void closedThreeIsNotOpen() {
         // O.XXX.O : 양쪽이 바로 막혀 있어서 열린 3이 아니다

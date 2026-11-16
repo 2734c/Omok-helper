@@ -6,7 +6,7 @@ import android.content.SharedPreferences;
 /** 앱 설정 (판 크기, 룰, 내 돌 색, 추천 개수, 바둑판 위치) */
 public final class Prefs {
     public int boardSize = 15;
-    public boolean renju = false;
+    public int rules = 0;            // 규칙 (OmokEngine.B_OVERLINE 등을 합친 값, 0 = 자유룰)
     public int myColor = 0;          // 0 = 차례인 쪽 자동, 1 = 흑, 2 = 백
     public int topN = 3;
     public int thinkLevel = 1;       // 0 = 빠르게(0.5초), 1 = 보통(1.5초), 2 = 깊게(3초)
@@ -24,7 +24,9 @@ public final class Prefs {
         SharedPreferences s = sp(c);
         Prefs p = new Prefs();
         p.boardSize = s.getInt("boardSize", 15);
-        p.renju = s.getBoolean("renju", false);
+        // 예전 버전의 "렌주룰 켜기" 설정도 이어서 쓴다
+        p.rules = s.contains("rules") ? s.getInt("rules", 0)
+                : (s.getBoolean("renju", false) ? OmokEngine.RULE_RENJU : OmokEngine.RULE_FREE);
         p.myColor = s.getInt("myColor", 0);
         p.topN = s.getInt("topN", 3);
         p.thinkLevel = s.getInt("thinkLevel", 1);
@@ -48,7 +50,7 @@ public final class Prefs {
     public void save(Context c) {
         sp(c).edit()
                 .putInt("boardSize", boardSize)
-                .putBoolean("renju", renju)
+                .putInt("rules", rules)
                 .putInt("myColor", myColor)
                 .putInt("topN", topN)
                 .putInt("thinkLevel", thinkLevel)
@@ -67,7 +69,7 @@ public final class Prefs {
     public void saveSettings(Context c) {
         sp(c).edit()
                 .putInt("boardSize", boardSize)
-                .putBoolean("renju", renju)
+                .putInt("rules", rules)
                 .putInt("myColor", myColor)
                 .putInt("topN", topN)
                 .putInt("thinkLevel", thinkLevel)
@@ -125,6 +127,6 @@ public final class Prefs {
 
     /** 설정이 바뀌었는지 비교하기 위한 문자열 */
     public String key() {
-        return boardSize + "/" + renju + "/" + myColor + "/" + topN + "/" + thinkLevel + "/" + calibrated + "/" + x0 + "," + y0 + "," + x1 + "," + y1;
+        return boardSize + "/" + rules + "/" + myColor + "/" + topN + "/" + thinkLevel + "/" + calibrated + "/" + x0 + "," + y0 + "," + x1 + "," + y1;
     }
 }

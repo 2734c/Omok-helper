@@ -17,6 +17,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.text.InputType;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
@@ -71,8 +72,7 @@ public class MainActivity extends Activity {
                 i -> prefs.boardSize = i == 1 ? 19 : 15));
 
         card.addView(label("규칙"));
-        card.addView(radios(new String[]{"자유룰", "렌주룰 (흑 3-3·4-4·장목 금지)"}, prefs.renju ? 1 : 0,
-                i -> prefs.renju = i == 1));
+        buildRules(card);
 
         card.addView(label("추천 받을 돌"));
         card.addView(radios(new String[]{"자동 (차례인 쪽)", "흑", "백"}, prefs.myColor,
@@ -253,6 +253,58 @@ public class MainActivity extends Activity {
             if (i == checked) b.setChecked(true);
         }
         return g;
+    }
+
+    // ------------------------------------------------------------------ 규칙
+
+    private void buildRules(LinearLayout card) {
+        TextView current = text("", 13, 0xFF6B5B4B, false);
+        Runnable updateName = () -> current.setText("현재 규칙: " + OmokEngine.ruleName(prefs.rules)
+                + "  — 게임의 규칙과 똑같이 맞춰 주세요");
+        updateName.run();
+        card.addView(current);
+
+        // 한 번에 맞추기
+        LinearLayout presets = new LinearLayout(this);
+        presets.setOrientation(LinearLayout.HORIZONTAL);
+        String[] names = {"자유룰", "렌주룰"};
+        int[] values = {OmokEngine.RULE_FREE, OmokEngine.RULE_RENJU};
+        for (int i = 0; i < 2; i++) {
+            final int v = values[i];
+            Button b = button(names[i], prefs.rules == v ? 0xFF5D4037 : 0xFFBCAAA4);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(40), 1);
+            lp.setMargins(i == 0 ? 0 : dp(6), dp(6), i == 0 ? dp(6) : 0, dp(4));
+            b.setLayoutParams(lp);
+            b.setTextSize(14);
+            b.setOnClickListener(x -> {
+                prefs.rules = v;
+                prefs.saveSettings(this);
+                buildUi();
+            });
+            presets.addView(b);
+        }
+        card.addView(presets);
+
+        // 항목별 설정
+        String[] labels = {"흑 6목 이상(장목) 금지", "흑 3-3 금지", "흑 4-4 금지",
+                "백 6목 이상(장목) 금지", "백 3-3 금지", "백 4-4 금지"};
+        int[] flags = {OmokEngine.B_OVERLINE, OmokEngine.B_33, OmokEngine.B_44,
+                OmokEngine.W_OVERLINE, OmokEngine.W_33, OmokEngine.W_44};
+        for (int i = 0; i < labels.length; i++) {
+            final int f = flags[i];
+            CheckBox cb = new CheckBox(this);
+            cb.setText(labels[i]);
+            cb.setTextSize(14);
+            cb.setChecked((prefs.rules & f) != 0);
+            cb.setOnCheckedChangeListener((btn, on) -> {
+                prefs.rules = on ? (prefs.rules | f) : (prefs.rules & ~f);
+                prefs.saveSettings(this);
+                updateName.run();
+            });
+            card.addView(cb);
+        }
+        card.addView(text("※ 금지된 자리는 추천하지 않고, 상대가 그 자리로 이기는 것도 걱정하지 않습니다.\n"
+                + "※ 6목 이상 금지를 끄면 6목 이상도 승리로 계산합니다.", 12, 0xFF8D6E63, false));
     }
 
     // ------------------------------------------------------------------ 키 입력

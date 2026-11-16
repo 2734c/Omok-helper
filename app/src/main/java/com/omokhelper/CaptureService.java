@@ -250,11 +250,11 @@ public class CaptureService extends Service implements OverlayController.Listene
 
     private void analyzeAndShow(int[] board, Prefs p) {
         int n = p.boardSize;
-        OmokEngine engine = new OmokEngine(n, p.renju);
+        OmokEngine engine = new OmokEngine(n, p.rules);
         engine.load(board);
         int blacks = engine.count(OmokEngine.BLACK), whites = engine.count(OmokEngine.WHITE);
         int side = engine.sideToMove();
-        String counts = "흑 " + blacks + " · 백 " + whites;
+        String counts = "흑 " + blacks + " · 백 " + whites + " · " + OmokEngine.ruleName(p.rules);
 
         float cw = (p.x1 - p.x0) / (n - 1), ch = (p.y1 - p.y0) / (n - 1);
         float cell = Math.min(Math.abs(cw), Math.abs(ch));
