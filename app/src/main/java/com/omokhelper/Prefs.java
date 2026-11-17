@@ -10,7 +10,8 @@ public final class Prefs {
     public int myColor = 0;          // 0 = 차례인 쪽 자동, 1 = 흑, 2 = 백
     public int topN = 3;
     public int thinkLevel = 1;       // 0 = 빠르게(0.5초), 1 = 보통(1.5초), 2 = 깊게(3초)
-    public int markerTheme = 0;      // 추천 표시 색 (Themes.MARKER_THEMES)
+    public int markerTheme = 0;      // 흑 차례 추천 표시 색 (Themes.MARKER_THEMES)
+    public int markerThemeWhite = 1; // 백 차례 추천 표시 색 (기본: 네온 — 흑 차례와 구분되도록)
     public int panelTheme = 0;       // 패널 색 (Themes.PANEL_THEMES)
     public int displaySize = 1;      // 0 = 작게, 1 = 보통, 2 = 크게
     public boolean showDetection = false; // 인식 결과(읽은 돌, 금수 자리) 표시
@@ -32,6 +33,7 @@ public final class Prefs {
         p.topN = s.getInt("topN", 3);
         p.thinkLevel = s.getInt("thinkLevel", 1);
         p.markerTheme = s.getInt("markerTheme", 0);
+        p.markerThemeWhite = s.getInt("markerThemeWhite", 1);
         p.panelTheme = s.getInt("panelTheme", 0);
         p.displaySize = s.getInt("displaySize", 1);
         p.showDetection = s.getBoolean("showDetection", false);
@@ -57,6 +59,7 @@ public final class Prefs {
                 .putInt("topN", topN)
                 .putInt("thinkLevel", thinkLevel)
                 .putInt("markerTheme", markerTheme)
+                .putInt("markerThemeWhite", markerThemeWhite)
                 .putInt("panelTheme", panelTheme)
                 .putInt("displaySize", displaySize)
                 .putBoolean("showDetection", showDetection)

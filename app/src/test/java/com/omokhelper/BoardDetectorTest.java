@@ -110,6 +110,91 @@ public class BoardDetectorTest {
         }
     }
 
+    /**
+     * 추천 고리가 그려진 칸에 돌을 두어도 (고리가 아직 화면에 남아 있어도) 돌로 인식해야 한다.
+     * 이 앱이 그린 표시 위치(OverlayShapes)를 인식기에 알려 주면 그 픽셀은 건너뛴다.
+     */
+    @Test
+    public void stoneUnderOwnMarkerIsRecognizedWithMasks() {
+        int n = 15, ox = 40, oy = 300;
+        float cell = 66f;
+        for (float scale : new float[]{0.85f, 1f, 1.25f}) {
+            for (int[] theme : Themes.MARKER_THEMES) {
+                for (int stone = 1; stone <= 2; stone++) {
+                    FakeScreen s = board(n, ox, oy, cell);
+                    float[] masks = new float[4 * 2 * 3];
+                    int k = 0;
+                    // (7,7)에 돌 + 1순위 고리, (8,8) 빈칸 + 2순위 고리, (3,4) 빈칸 + 3순위 고리
+                    float cx = ox + 7 * cell, cy = oy + 7 * cell;
+                    if (stone == 1) s.circle(cx, cy, cell * 0.44f, 0x151515);
+                    else {
+                        s.circle(cx, cy, cell * 0.44f, 0x808080);
+                        s.circle(cx, cy, cell * 0.41f, 0xf2f2f2);
+                    }
+                    int[][] spots = {{7, 7, 1}, {8, 8, 2}, {3, 4, 3}};
+                    for (int[] sp : spots) {
+                        float x = ox + sp[0] * cell, y = oy + sp[1] * cell;
+                        int color = theme[sp[2] - 1] & 0xffffff;
+                        float r = cell * scale * OverlayShapes.RING_R, w = OverlayShapes.ringWidth(cell, scale, sp[2]);
+                        blendRing(s, x, y, r - w / 2, r + w / 2, color);
+                        blendRing(s, x + cell * scale * OverlayShapes.BADGE_OFF, y - cell * scale * OverlayShapes.BADGE_OFF,
+                                0, cell * scale * OverlayShapes.BADGE_R, color);
+                        k = OverlayShapes.addMarker(masks, k, x, y, cell, scale, sp[2]);
+                    }
+                    int[] expected = new int[n * n];
+                    expected[7 * n + 7] = stone;
+                    int[] got = BoardDetector.detect(s, ox, oy, ox + cell * 14, oy + cell * 14, n, null, masks);
+                    assertArrayEquals("scale " + scale + " stone " + stone, expected, got);
+                }
+            }
+        }
+    }
+
+    /** 인식 결과 점과 금수 × 표시도 제외 영역으로 처리 */
+    @Test
+    public void detectionDotsAreMasked() {
+        int n = 15, ox = 40, oy = 300;
+        float cell = 66f;
+        FakeScreen s = board(n, ox, oy, cell);
+        float[] masks = new float[4 * 3];
+        int k = 0;
+        float x = ox + 5 * cell, y = oy + 5 * cell;
+        s.circle(x, y, cell * 0.44f, 0x151515);
+        blendRing(s, x - cell * OverlayShapes.DOT_OFF, y - cell * OverlayShapes.DOT_OFF, 0, cell * OverlayShapes.DOT_R, 0x00E5FF);
+        k = OverlayShapes.addDot(masks, k, x, y, cell, 1);
+        float ex = ox + 9 * cell, ey = oy + 9 * cell;
+        blendRing(s, ex + cell * OverlayShapes.DOT_OFF, ey + cell * OverlayShapes.DOT_OFF, 0, cell * 0.11f, 0xFF1744);
+        k = OverlayShapes.addDot(masks, k, ex, ey, cell, 3);
+        int[] expected = new int[n * n];
+        expected[5 * n + 5] = OmokEngine.BLACK;
+        assertArrayEquals(expected, BoardDetector.detect(s, ox, oy, ox + cell * 14, oy + cell * 14, n, null, masks));
+    }
+
+    private static FakeScreen board(int n, int ox, int oy, float cell) {
+        FakeScreen s = new FakeScreen(1080, 2000, 0x223344);
+        s.rect(ox - 30, oy - 30, (int) (ox + cell * (n - 1) + 30), (int) (oy + cell * (n - 1) + 30), 0xdcb35c);
+        for (int i = 0; i < n; i++) {
+            int p = Math.round(i * cell);
+            s.rect(ox + p - 1, oy, ox + p + 1, (int) (oy + cell * (n - 1)), 0x3a2a10);
+            s.rect(ox, oy + p - 1, (int) (ox + cell * (n - 1)), oy + p + 1, 0x3a2a10);
+        }
+        return s;
+    }
+
+    /** 오버레이 창은 불투명도 0.8 로 그려지므로 아래 화면과 섞어서 그린다 */
+    private static void blendRing(FakeScreen s, float cx, float cy, float r0, float r1, int c) {
+        for (int y = (int) (cy - r1) - 1; y <= cy + r1 + 1; y++)
+            for (int x = (int) (cx - r1) - 1; x <= cx + r1 + 1; x++) {
+                float d2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+                if (d2 < r0 * r0 || d2 > r1 * r1) continue;
+                int b = s.px[y * s.w + x];
+                int r = (int) (((c >> 16) & 255) * 0.8 + ((b >> 16) & 255) * 0.2);
+                int g = (int) (((c >> 8) & 255) * 0.8 + ((b >> 8) & 255) * 0.2);
+                int bl = (int) ((c & 255) * 0.8 + (b & 255) * 0.2);
+                s.px[y * s.w + x] = (r << 16) | (g << 8) | bl;
+            }
+    }
+
     /** 게임이 금수 자리 등에 그리는 표시(빨간 점, ×, 반투명 돌)는 돌이 아니다 */
     @Test
     public void gameMarksAreNotStones() {

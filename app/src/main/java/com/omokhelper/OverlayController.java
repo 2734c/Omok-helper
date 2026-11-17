@@ -76,8 +76,10 @@ public final class OverlayController {
     private final Button[] colorButtons = new Button[3];
     private TextView colorChip;
     private static final String[] MY_COLOR_NAMES = {"자동", "흑", "백"};
-    private Button markerColorButton, panelColorButton, detectionButton;
-    private FrameLayout calibLayer;
+    private Button markerColorButton, markerColorButtonWhite, panelColorButton, detectionButton;
+    /** 이 앱이 화면에 그린 표시의 위치 (화면 좌표, 4개씩 [x, y, 안쪽 반지름, 바깥 반지름]) — 캡처 스레드에서 읽는다 */
+    private volatile float[] overlayMasks = null;
+    private volatile FrameLayout calibLayer;
 
     private boolean paused = false;
     /** 패널이 차지하는 화면 영역 [left, top, right, bottom] — 캡처 스레드에서 읽는다 */
@@ -169,10 +171,37 @@ public final class OverlayController {
     }
 
     public void showResult(List<Marker> markers, List<Dot> dots, float cell, String status) {
+        showResult(markers, dots, cell, status, OmokEngine.BLACK);
+    }
+
+    /** side : 추천 대상(흑/백) — 흑 차례와 백 차례의 추천 색을 다르게 그린다 */
+    public void showResult(List<Marker> markers, List<Dot> dots, float cell, String status, int side) {
         if (markerView == null) return;
         markerView.dots = dots;
+        markerView.side = side;
         markerView.setMarkers(markers, cell);
-        if (statusText != null) statusText.setText(status);
+        updateMasks();
+        if (statusText != null) {
+            // 첫 줄 앞에 그 차례의 추천 색 점을 붙여 어느 쪽 추천인지 바로 보이게
+            int color = (side == OmokEngine.WHITE ? markerView.colorsWhite : markerView.colorsBlack)[0];
+            SpannableStringBuilder sb = new SpannableStringBuilder("● ");
+            sb.setSpan(new ForegroundColorSpan(color), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            sb.append(status);
+            statusText.setText(markers.isEmpty() ? status : sb);
+        }
+    }
+
+    public float[] getMasks() {
+        return overlayMasks;
+    }
+
+    /** 판 맞추기 화면이 떠 있는가 (이때는 어두운 막과 격자선이 화면에 있으므로 인식하지 않는다) */
+    public boolean isCalibrating() {
+        return calibLayer != null;
+    }
+
+    private void updateMasks() {
+        overlayMasks = markerView == null ? null : markerView.computeMasks();
     }
 
     public void setStatus(String status) {
@@ -249,7 +278,10 @@ public final class OverlayController {
         pauseButton.setOnClickListener(v -> {
             paused = !paused;
             pauseButton.setText(paused ? "재개" : "멈춤");
-            if (paused && markerView != null) markerView.setMarkers(new ArrayList<>(), 0);
+            if (paused && markerView != null) {
+                markerView.setMarkers(new ArrayList<>(), 0);
+                updateMasks();
+            }
             setStatus(paused ? "일시정지됨" : "다시 감지하는 중…");
             listener.onPauseChanged(paused);
         });
@@ -375,11 +407,19 @@ public final class OverlayController {
         box.addView(detectionButton);
 
         // 색 (누를 때마다 다음 색)
-        box.addView(settingsLabel("색 — 누를 때마다 바뀜"));
+        box.addView(settingsLabel("색 — 누를 때마다 바뀜 (흑 차례 / 백 차례 따로)"));
         markerColorButton = smallButton("");
         markerColorButton.setOnClickListener(v -> {
             Prefs p = Prefs.load(ctx);
             p.markerTheme = (p.markerTheme + 1) % Themes.MARKER_THEMES.length;
+            p.save(ctx);
+            applyLook();
+            refreshSettings();
+        });
+        markerColorButtonWhite = smallButton("");
+        markerColorButtonWhite.setOnClickListener(v -> {
+            Prefs p = Prefs.load(ctx);
+            p.markerThemeWhite = (p.markerThemeWhite + 1) % Themes.MARKER_THEMES.length;
             p.save(ctx);
             applyLook();
             refreshSettings();
@@ -393,6 +433,7 @@ public final class OverlayController {
             refreshSettings();
         });
         box.addView(markerColorButton);
+        box.addView(markerColorButtonWhite);
         box.addView(panelColorButton);
         return box;
     }
@@ -409,7 +450,10 @@ public final class OverlayController {
         p.save(ctx);
         updateColorChip();
         if (settingsBox != null && settingsBox.getVisibility() == View.VISIBLE) refreshSettings();
-        if (markerView != null) markerView.setMarkers(new ArrayList<>(), 0);
+        if (markerView != null) {
+            markerView.setMarkers(new ArrayList<>(), 0);
+            updateMasks();
+        }
         setStatus(c == 0 ? "내 돌: 자동 — 차례인 쪽의 추천을 보여 줘요."
                 : "내 돌: " + MY_COLOR_NAMES[c] + " — " + MY_COLOR_NAMES[c] + " 차례에만 추천을 보여 줘요.");
         listener.onSettingsChanged();
@@ -443,8 +487,13 @@ public final class OverlayController {
             setStatus("프리셋 " + slot + "이(가) 비어 있어요.\n[판 맞추기] 후 [저장 " + slot + "]을 눌러 저장하세요.");
             return;
         }
-        if (markerView != null) markerView.setMarkers(new ArrayList<>(), 0);
+        if (markerView != null) {
+            markerView.setMarkers(new ArrayList<>(), 0);
+            updateMasks();
+        }
+        updateMasks();
         listener.onCalibrationChanged();
+        if (panel != null) panel.post(this::placePanelOutsideBoard);
         setStatus("프리셋 " + slot + " 불러옴 (" + p.boardSize + "×" + p.boardSize + ") — 감지 중…");
     }
 
@@ -473,17 +522,23 @@ public final class OverlayController {
         }
 
         // 추천 색 : 색 점 3개로 미리보기
-        int[] mc = Themes.MARKER_THEMES[p.markerTheme % Themes.MARKER_THEMES.length];
-        SpannableStringBuilder sb = new SpannableStringBuilder("추천 색  ");
+        markerColorButton.setText(themeLabel("흑 차례 색  ", p.markerTheme));
+        markerColorButtonWhite.setText(themeLabel("백 차례 색  ", p.markerThemeWhite));
+        panelColorButton.setText("패널 색  " + Themes.PANEL_THEME_NAMES[p.panelTheme % Themes.PANEL_THEMES.length] + " ▸");
+        detectionButton.setText(p.showDetection ? "인식 결과 보기 : 켬 ✓" : "인식 결과 보기 : 끔");
+    }
+
+    private static CharSequence themeLabel(String head, int theme) {
+        int t = theme % Themes.MARKER_THEMES.length;
+        int[] mc = Themes.MARKER_THEMES[t];
+        SpannableStringBuilder sb = new SpannableStringBuilder(head);
         for (int i = 0; i < 3; i++) {
             int start = sb.length();
             sb.append("●");
             sb.setSpan(new ForegroundColorSpan(mc[i]), start, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
-        sb.append("  ").append(Themes.MARKER_THEME_NAMES[p.markerTheme % Themes.MARKER_THEMES.length]).append(" ▸");
-        markerColorButton.setText(sb);
-        panelColorButton.setText("패널 색  " + Themes.PANEL_THEME_NAMES[p.panelTheme % Themes.PANEL_THEMES.length] + " ▸");
-        detectionButton.setText(p.showDetection ? "인식 결과 보기 : 켬 ✓" : "인식 결과 보기 : 끔");
+        sb.append("  ").append(Themes.MARKER_THEME_NAMES[t]).append(" ▸");
+        return sb;
     }
 
     /** 저장된 색·크기 설정을 패널과 추천 표시에 적용 */
@@ -508,10 +563,53 @@ public final class OverlayController {
         updateColorChip();
         if (colorChip != null) colorChip.setTextSize(12 * scale);
         if (markerView != null) {
-            markerView.colors = Themes.MARKER_THEMES[p.markerTheme % Themes.MARKER_THEMES.length];
+            markerView.colorsBlack = Themes.MARKER_THEMES[p.markerTheme % Themes.MARKER_THEMES.length];
+            markerView.colorsWhite = Themes.MARKER_THEMES[p.markerThemeWhite % Themes.MARKER_THEMES.length];
             markerView.scale = scale;
             markerView.invalidate();
+            updateMasks();
         }
+        if (panel != null) panel.post(this::placePanelOutsideBoard);
+    }
+
+    // ------------------------------------------------------------------ 패널이 바둑판을 가리지 않게
+
+    /** 바둑판이 차지하는 화면 영역 (돌 반 칸 여유 포함). 판 맞추기 전이면 null */
+    private float[] boardRect() {
+        Prefs p = Prefs.load(ctx);
+        if (!p.calibrated) return null;
+        float cell = Math.min(Math.abs(p.x1 - p.x0), Math.abs(p.y1 - p.y0)) / (p.boardSize - 1);
+        float m = cell * 0.6f;
+        return new float[]{Math.min(p.x0, p.x1) - m, Math.min(p.y0, p.y1) - m,
+                Math.max(p.x0, p.x1) + m, Math.max(p.y0, p.y1) + m};
+    }
+
+    /** 패널이 바둑판과 겹치는가 */
+    public boolean panelCoversBoard() {
+        int[] pr = panelRect;
+        float[] br = boardRect();
+        return pr != null && br != null && pr[0] < br[2] && pr[2] > br[0] && pr[1] < br[3] && pr[3] > br[1];
+    }
+
+    /** 패널이 바둑판을 가리면 바둑판 위쪽이나 아래쪽 빈 곳으로 옮긴다 */
+    private void placePanelOutsideBoard() {
+        if (panel == null || panel.getVisibility() != View.VISIBLE || panel.getHeight() == 0) return;
+        updatePanelRect();
+        if (!panelCoversBoard()) return;
+        float[] br = boardRect();
+        int[] pr = panelRect;
+        int h = pr[3] - pr[1];
+        int screenH = ctx.getResources().getDisplayMetrics().heightPixels;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            screenH = wm.getMaximumWindowMetrics().getBounds().height();
+        }
+        int target;
+        if (br[1] - dp(32) >= h + dp(8)) target = Math.round(br[1]) - h - dp(8);          // 바둑판 위
+        else if (screenH - br[3] - dp(48) >= h + dp(8)) target = Math.round(br[3]) + dp(8); // 바둑판 아래
+        else return; // 빈 곳이 없음 → 상태줄에 경고만
+        panelParams.y += target - pr[1];
+        wm.updateViewLayout(panel, panelParams);
+        panel.post(this::updatePanelRect);
     }
 
     private Button smallButton(String text) {
@@ -543,7 +641,10 @@ public final class OverlayController {
     private void startCalibration() {
         if (calibLayer != null) return;
         Prefs prefs = Prefs.load(ctx);
-        if (markerView != null) markerView.setMarkers(new ArrayList<>(), 0);
+        if (markerView != null) {
+            markerView.setMarkers(new ArrayList<>(), 0);
+            updateMasks();
+        }
         if (panel != null) panel.setVisibility(View.GONE);
 
         calibLayer = new FrameLayout(ctx);
@@ -599,6 +700,7 @@ public final class OverlayController {
             p.save(ctx);
             endCalibration();
             listener.onCalibrationChanged();
+            if (panel != null) panel.post(this::placePanelOutsideBoard);
         });
 
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
@@ -763,8 +865,20 @@ public final class OverlayController {
         List<Dot> dots = new ArrayList<>();
         private float cell;
         private final Paint dotPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        int[] colors = Themes.MARKER_THEMES[0];
-        float scale = 1f; // 0.85 ~ 1.25 : 이 범위에서는 돌 인식 영역(반지름 0.26칸)을 가리지 않는다
+        int[] colorsBlack = Themes.MARKER_THEMES[0];
+        int[] colorsWhite = Themes.MARKER_THEMES[1];
+        int side = OmokEngine.BLACK;
+        float scale = 1f; // 0.85 ~ 1.25 (표시 위치는 computeMasks로 인식기에 알려 주므로 돌 인식에 섞이지 않는다)
+
+        /** 지금 그려진 표시들의 위치 (인식기가 이 픽셀을 건너뛰도록). 화면 좌표. */
+        float[] computeMasks() {
+            if (cell <= 0 || (markers.isEmpty() && dots.isEmpty())) return null;
+            float[] m = new float[(markers.size() * 2 + dots.size()) * 4];
+            int k = 0;
+            for (Marker mk : markers) k = OverlayShapes.addMarker(m, k, mk.x, mk.y, cell, scale, mk.rank);
+            for (Dot d : dots) k = OverlayShapes.addDot(m, k, d.x, d.y, cell, d.kind);
+            return m;
+        }
         private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint textBg = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -795,12 +909,14 @@ public final class OverlayController {
                 if (d.kind == 1 || d.kind == 2) {
                     dotPaint.setStyle(Paint.Style.FILL);
                     dotPaint.setColor(d.kind == 1 ? 0xFF00E5FF : 0xFFFF4081);
-                    c.drawCircle(x - cell * 0.38f, y - cell * 0.38f, cell * 0.07f, dotPaint);
+                    c.drawCircle(x - cell * OverlayShapes.DOT_OFF, y - cell * OverlayShapes.DOT_OFF,
+                            cell * OverlayShapes.DOT_R, dotPaint);
                 } else {
                     dotPaint.setStyle(Paint.Style.STROKE);
-                    dotPaint.setStrokeWidth(Math.max(2f, cell * 0.035f));
+                    dotPaint.setStrokeWidth(Math.max(2f, cell * OverlayShapes.CROSS_W));
                     dotPaint.setColor(d.kind == 3 ? 0xFFFF1744 : 0xFFAA00FF);
-                    float bx = x + cell * 0.38f, by = y + cell * 0.38f, h = cell * 0.08f;
+                    float bx = x + cell * OverlayShapes.DOT_OFF, by = y + cell * OverlayShapes.DOT_OFF,
+                            h = cell * OverlayShapes.CROSS_H;
                     c.drawLine(bx - h, by - h, bx + h, by + h, dotPaint);
                     c.drawLine(bx - h, by + h, bx + h, by - h, dotPaint);
                 }
@@ -808,14 +924,15 @@ public final class OverlayController {
             for (int i = markers.size() - 1; i >= 0; i--) {
                 Marker m = markers.get(i);
                 float x = m.x - loc[0], y = m.y - loc[1];
+                int[] colors = side == OmokEngine.WHITE ? colorsWhite : colorsBlack;
                 int color = m.winning ? colors[3] : (m.rank == 1 ? colors[0] : (m.rank == 2 ? colors[1] : colors[2]));
                 ring.setColor(color);
-                ring.setStrokeWidth(Math.max(3f, cell * scale * (m.rank == 1 ? 0.12f : 0.08f)));
-                c.drawCircle(x, y, cell * scale * 0.42f, ring);
+                ring.setStrokeWidth(OverlayShapes.ringWidth(cell, scale, m.rank));
+                c.drawCircle(x, y, cell * scale * OverlayShapes.RING_R, ring);
 
                 // 순위 숫자 (오른쪽 위 바깥)
-                float r = cell * scale * 0.2f;
-                float bx = x + cell * scale * 0.38f, by = y - cell * scale * 0.38f;
+                float r = cell * scale * OverlayShapes.BADGE_R;
+                float bx = x + cell * scale * OverlayShapes.BADGE_OFF, by = y - cell * scale * OverlayShapes.BADGE_OFF;
                 textBg.setColor(color);
                 c.drawCircle(bx, by, r, textBg);
                 text.setTextSize(r * 1.4f);

@@ -67,6 +67,8 @@ public class CaptureService extends Service implements OverlayController.Listene
     private int stableCount;
     private String lastKey = "";
     private String lastOpening;
+    private volatile boolean panelCovers;
+    private boolean countMismatch;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -215,7 +217,7 @@ public class CaptureService extends Service implements OverlayController.Listene
 
     private void process(Image img) {
         Prefs p = Prefs.load(this);
-        if (!p.calibrated) return;
+        if (!p.calibrated || overlay.isCalibrating()) return;
         int n = p.boardSize;
 
         // 화면 좌표 -> 캡처 이미지 좌표 (보통 1:1)
@@ -224,7 +226,23 @@ public class CaptureService extends Service implements OverlayController.Listene
         int[] pr = overlay.getPanelRect();
         int[] skip = pr == null ? null : new int[]{
                 Math.round(pr[0] * sx), Math.round(pr[1] * sy), Math.round(pr[2] * sx), Math.round(pr[3] * sy)};
-        int[] board = BoardDetector.detect(src, p.x0 * sx, p.y0 * sy, p.x1 * sx, p.y1 * sy, n, skip);
+        // 이 앱이 그린 표시(추천 고리 등)는 게임 화면이 아니므로 인식에서 뺀다
+        float[] ms = overlay.getMasks();
+        float[] masks = null;
+        if (ms != null) {
+            float sr = (sx + sy) / 2;
+            masks = new float[ms.length];
+            for (int i = 0; i + 3 < ms.length; i += 4) {
+                masks[i] = ms[i] * sx;
+                masks[i + 1] = ms[i + 1] * sy;
+                masks[i + 2] = ms[i + 2] * sr;
+                masks[i + 3] = ms[i + 3] * sr;
+            }
+        }
+        int[] board = BoardDetector.detect(src, p.x0 * sx, p.y0 * sy, p.x1 * sx, p.y1 * sy, n, skip, masks);
+        boolean covered = false;
+        for (int v : board) covered |= v == BoardDetector.UNKNOWN;
+        panelCovers = covered && overlay.panelCoversBoard();
 
         // 패널에 가려 읽지 못한 칸은 이전 값을 사용
         for (int i = 0; i < board.length; i++) {
@@ -254,6 +272,8 @@ public class CaptureService extends Service implements OverlayController.Listene
         OmokEngine engine = new OmokEngine(n, p.rules);
         engine.load(board);
         int blacks = engine.count(OmokEngine.BLACK), whites = engine.count(OmokEngine.WHITE);
+        // 흑이 먼저 두므로 보통 흑 = 백 또는 흑 = 백 + 1. 아니면 인식이 틀렸을 가능성이 크다
+        countMismatch = blacks - whites < 0 || blacks - whites > 1;
         int side = engine.sideToMove();
         String counts = "흑 " + blacks + " · 백 " + whites + " · " + OmokEngine.ruleName(p.rules);
 
@@ -296,8 +316,8 @@ public class CaptureService extends Service implements OverlayController.Listene
                 : "\n🚫 " + colorName(side) + " 금수 " + forbiddenCount + "곳: " + forbidden + (forbiddenCount > 5 ? " …" : "");
 
         if (p.myColor != 0 && side != p.myColor) {
-            String s = "상대(" + colorName(side) + ") 차례 — 기다리는 중\n" + counts;
-            main.post(() -> overlay.showResult(new ArrayList<>(), dots, cell, s));
+            String s = "상대(" + colorName(side) + ") 차례 — 기다리는 중\n" + counts + coverWarning();
+            main.post(() -> overlay.showResult(new ArrayList<>(), dots, cell, s, side));
             return;
         }
 
@@ -333,8 +353,14 @@ public class CaptureService extends Service implements OverlayController.Listene
             }
             if (r.threatSequence != null) sb.append("⚠ 상대에게 연속 4 필승 수순이 있어요!");
         }
-        String status = sb.toString().trim();
-        main.post(() -> overlay.showResult(markers, dots, cell, status));
+        String status = sb.toString().trim() + coverWarning();
+        main.post(() -> overlay.showResult(markers, dots, cell, status, side));
+    }
+
+    private String coverWarning() {
+        String w = panelCovers ? "\n⚠ 패널이 바둑판을 가려 일부 칸을 못 읽어요. 제목줄을 끌어 바둑판 밖으로 옮겨 주세요." : "";
+        if (countMismatch) w += "\n⚠ 흑·백 돌 개수가 맞지 않아요. 판 맞추기나 [설정] → 인식 결과 보기로 확인해 주세요.";
+        return w;
     }
 
     private static String colorName(int c) {

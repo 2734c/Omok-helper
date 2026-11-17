@@ -34,7 +34,17 @@ public final class BoardDetector {
      * @param skip  이 사각형 [left, top, right, bottom] 안의 교차점은 UNKNOWN (오버레이 창에 가려진 곳). null 가능
      * @return 길이 n*n, 값은 EMPTY / BLACK / WHITE / UNKNOWN
      */
-    public static synchronized int[] detect(PixelSource src, float x0, float y0, float x1, float y1, int n, int[] skip) {
+    public static int[] detect(PixelSource src, float x0, float y0, float x1, float y1, int n, int[] skip) {
+        return detect(src, x0, y0, x1, y1, n, skip, null);
+    }
+
+    /**
+     * @param masks 이 앱이 화면에 그린 표시(추천 고리, 순위 배지, 인식 점 등)의 위치.
+     *              4개씩 [중심x, 중심y, 안쪽 반지름, 바깥 반지름] (이미지 좌표, 안쪽 반지름 0이면 원).
+     *              이 안의 픽셀은 게임 화면이 아니므로 판정에 쓰지 않는다. null 가능.
+     */
+    public static synchronized int[] detect(PixelSource src, float x0, float y0, float x1, float y1, int n, int[] skip,
+                                            float[] masks) {
         float cw = (x1 - x0) / (n - 1);
         float ch = (y1 - y0) / (n - 1);
         float cell = Math.min(Math.abs(cw), Math.abs(ch));
@@ -45,14 +55,17 @@ public final class BoardDetector {
         int k = 0;
         for (int j = 0; j < n - 1; j++) {
             for (int i = 0; i < n - 1; i++) {
-                int c = safeRgb(src, x0 + (i + 0.5f) * cw, y0 + (j + 0.5f) * ch);
+                float bx = x0 + (i + 0.5f) * cw, by = y0 + (j + 0.5f) * ch;
+                if (masked(masks, ALL, masks == null ? 0 : masks.length / 4, bx, by)) continue;
+                int c = safeRgb(src, bx, by);
                 boardL[k] = lum(c);
                 boardS[k] = sat(c);
                 k++;
             }
         }
-        float lb = median(boardL, boardL.length);
-        float sb = median(boardS, boardS.length);
+        if (k < 4) return detect(src, x0, y0, x1, y1, n, skip, null); // 표시가 판을 거의 다 덮은 특수한 경우
+        float lb = median(boardL, k);
+        float sb = median(boardS, k);
 
         // 2) 교차점마다 판정
         int r = Math.max(1, Math.round(cell * 0.26f));
@@ -69,29 +82,43 @@ public final class BoardDetector {
                     out[j * n + i] = UNKNOWN;
                     continue;
                 }
+                // 이 교차점 근처에 있는 이 앱의 표시만 골라 둔다 (빠르게 검사하기 위해)
+                int near = nearMasks(masks, cx, cy, cell * 0.45f);
                 int m = 0;
                 for (int dy = -r; dy <= r; dy += step) {
                     for (int dx = -r; dx <= r; dx += step) {
                         if (dx * dx + dy * dy > r * r) continue;
+                        if (masked(masks, nearIdx, near, cx + dx, cy + dy)) continue;
                         int c = safeRgb(src, cx + dx, cy + dy);
                         ls[m] = lum(c);
                         ss[m] = sat(c);
                         m++;
                     }
                 }
+                if (m < 4) { // 가운데가 거의 다 가려져 있으면 판단하지 않음 (이전 값 사용)
+                    out[j * n + i] = UNKNOWN;
+                    continue;
+                }
                 int inner = classify(median(ls, m), median(ss, m), lb, sb);
                 if (inner != OmokEngine.EMPTY) {
                     // 바깥 고리(반지름 0.34칸)도 같은 색이어야 진짜 돌.
                     // 게임이 금수 자리 등에 그리는 작은 점·× 표시는 바깥 고리까지 닿지 않는다.
                     float ringR = cell * 0.34f;
+                    int rc = 0;
                     for (int q = 0; q < RING_POINTS; q++) {
                         double t = 2 * Math.PI * q / RING_POINTS;
-                        int c = safeRgb(src, cx + (float) (ringR * Math.cos(t)), cy + (float) (ringR * Math.sin(t)));
-                        ringL[q] = lum(c);
-                        ringS[q] = sat(c);
+                        float px = cx + (float) (ringR * Math.cos(t)), py = cy + (float) (ringR * Math.sin(t));
+                        if (masked(masks, nearIdx, near, px, py)) continue;
+                        int c = safeRgb(src, px, py);
+                        ringL[rc] = lum(c);
+                        ringS[rc] = sat(c);
+                        rc++;
                     }
-                    int outer = classify(median(ringL, RING_POINTS), median(ringS, RING_POINTS), lb, sb);
-                    if (outer != inner) inner = OmokEngine.EMPTY;
+                    // 바깥 고리가 이 앱의 표시에 대부분 가려졌으면 가운데 판정만 믿는다
+                    if (rc >= 6) {
+                        int outer = classify(median(ringL, rc), median(ringS, rc), lb, sb);
+                        if (outer != inner) inner = OmokEngine.EMPTY;
+                    }
                 }
                 out[j * n + i] = inner;
             }
@@ -100,6 +127,32 @@ public final class BoardDetector {
     }
 
     private static final int RING_POINTS = 24;
+    private static final int[] ALL = null;
+    private static int[] nearIdx = new int[64];
+
+    /** (cx,cy)에서 reach 안에 걸치는 표시들의 번호를 nearIdx에 모은다 */
+    private static int nearMasks(float[] masks, float cx, float cy, float reach) {
+        if (masks == null) return 0;
+        int cnt = 0;
+        for (int q = 0; q + 3 < masks.length; q += 4) {
+            float dx = masks[q] - cx, dy = masks[q + 1] - cy, lim = masks[q + 3] + reach;
+            if (dx * dx + dy * dy > lim * lim) continue;
+            if (cnt == nearIdx.length) nearIdx = java.util.Arrays.copyOf(nearIdx, cnt * 2);
+            nearIdx[cnt++] = q;
+        }
+        return cnt;
+    }
+
+    /** 점 (x,y)가 표시 안에 있는가. idx가 ALL(null)이면 count개의 모든 표시를 검사 */
+    private static boolean masked(float[] masks, int[] idx, int count, float x, float y) {
+        if (masks == null) return false;
+        for (int t = 0; t < count; t++) {
+            int q = idx == ALL ? t * 4 : idx[t];
+            float dx = x - masks[q], dy = y - masks[q + 1], d2 = dx * dx + dy * dy;
+            if (d2 <= masks[q + 3] * masks[q + 3] && d2 >= masks[q + 2] * masks[q + 2]) return true;
+        }
+        return false;
+    }
     private static final float[] ringL = new float[RING_POINTS];
     private static final float[] ringS = new float[RING_POINTS];
 
