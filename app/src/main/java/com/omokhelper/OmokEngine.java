@@ -391,11 +391,14 @@ public final class OmokEngine {
         public List<int[]> pv;                   // 깊이 탐색의 예상 수순 (없으면 null)
         public int searchDepth;                  // 깊이 탐색으로 읽은 수 (0 = 탐색 안 함)
         public int searchNodes;                  // 검토한 판의 수
+        public boolean vct;                      // winSequence 가 연속 3·4(VCT) 수순인가
+        public String opening;                   // 초반 주형 이름 (알 수 있을 때만)
     }
 
     // ---------------------------------------------------------------- 추천
 
     /** p가 둘 차례일 때 좋은 수를 topN개 추천한다. */
+    @SuppressWarnings("unchecked")
     public Result recommend(int p, int topN) {
         Result res = new Result();
         res.player = p;
@@ -411,17 +414,36 @@ public final class OmokEngine {
         boolean oppHasFive = false;
         for (int[] c : cands) if (makesFive(c[0], c[1], opp)) oppHasFive = true;
 
-        boolean myTrap = false, threatTrap = false;
+        boolean myTrap = false, threatTrap = false, myVct = false, threatVct = false;
 
-        // 1) 필승 수순 탐색
+        // 1) 필승 수순 탐색 : 먼저 연속 4(VCF), 없으면 연속 3·4(VCT)
+        // (내 필승 수순이 있으면 상대 수순은 볼 필요 없음. VCT는 상대의 반격 4까지 검토하므로 상대 VCF보다 먼저 본다)
         if (!oppHasFive) {
-            res.winSequence = findVcf(p, 10, 4000);
-            myTrap = res.winSequence != null && lastVcfTrap;
+            // 지난번에 찾은 필승 계획대로 상대가 응수했다면 그 계획을 이어서 둔다
+            Object[] plan = planFor(p);
+            if (plan != null) {
+                res.winSequence = (List<int[]>) plan[0];
+                myVct = (Boolean) plan[1];
+            }
+            if (res.winSequence == null) {
+                res.winSequence = findVcf(p, 10, 4000);
+                myTrap = res.winSequence != null && lastVcfTrap;
+            }
+            if (res.winSequence == null) {
+                res.winSequence = findVct(p, VCT_DEPTH, VCT_NODES, VCT_MS);
+                myVct = res.winSequence != null;
+            }
+            if (res.winSequence != null) rememberPlan(p, res.winSequence, myVct);
             if (res.winSequence == null) {
                 res.threatSequence = findVcf(opp, 10, 4000);
                 threatTrap = res.threatSequence != null && lastVcfTrap;
+                if (res.threatSequence == null) {
+                    res.threatSequence = findVct(opp, VCT_DEPTH, VCT_NODES, VCT_MS);
+                    threatVct = res.threatSequence != null;
+                }
             }
         }
+        res.vct = myVct;
 
         // 2) 모든 후보의 점수 계산
         List<Move> moves = new ArrayList<>();
@@ -444,7 +466,8 @@ public final class OmokEngine {
                 int[] first = res.winSequence.get(0);
                 if (first[0] == x && first[1] == y && a < WIN) {
                     score = 900_000;
-                    reason = "필승 수순(연속 4" + (myTrap ? " + 금수 유도" : "") + ") 시작 — "
+                    score = myVct ? 880_000 : 900_000;
+                    reason = "필승 수순(" + (myVct ? "연속 3·4, VCT" : "연속 4") + (myTrap ? " + 금수 유도" : "") + ") 시작 — "
                             + (res.winSequence.size() + 1) / 2 + "수 만에 승리";
                 }
             } else if (res.threatSequence != null && a < WIN && d < WIN) {
@@ -453,7 +476,8 @@ public final class OmokEngine {
                     int[] t = res.threatSequence.get(i);
                     if (t[0] == x && t[1] == y) {
                         score += i == 0 ? 40_000 : 15_000;
-                        reason = threatTrap ? "상대의 필승 수순(연속 4 + 금수 유도) 차단" : "상대의 필승 수순(연속 4) 차단";
+                        reason = threatVct ? "상대의 필승 수순(연속 3·4, VCT) 차단"
+                                : (threatTrap ? "상대의 필승 수순(연속 4 + 금수 유도) 차단" : "상대의 필승 수순(연속 4) 차단");
                         break;
                     }
                 }
@@ -491,6 +515,28 @@ public final class OmokEngine {
      * 그 밖에는 DeepSearch(알파-베타)로 timeMs 동안 여러 수 앞을 읽어 순위를 정한다.
      */
     public Result recommendDeep(int p, int topN, long timeMs) {
+        // 초반 정석 : 흑 3수는 흑 필승으로 알려진 주형 자리를 먼저 추천
+        if (p == BLACK) {
+            List<Object[]> book = Openings.bookThirdMoves(this);
+            if (!book.isEmpty()) {
+                Result res = new Result();
+                res.player = p;
+                for (Object[] b : book) {
+                    int[] c = (int[]) b[0];
+                    Openings.Opening o = (Openings.Opening) b[1];
+                    res.moves.add(new Move(c[0], c[1], 500_000 - res.moves.size(),
+                            "주형 " + o.title() + " — " + o.verdict));
+                }
+                for (Move m : recommend(p, topN + book.size()).moves) {
+                    if (res.moves.size() >= topN) break;
+                    boolean dup = false;
+                    for (Move r : res.moves) dup |= r.x == m.x && r.y == m.y;
+                    if (!dup) res.moves.add(m);
+                }
+                while (res.moves.size() > topN) res.moves.remove(res.moves.size() - 1);
+                return res;
+            }
+        }
         Result base = recommend(p, 30);
         boolean decided = base.moves.isEmpty() || base.winSequence != null
                 || base.moves.get(0).score >= 800_000 || candidates(2).isEmpty();
@@ -682,6 +728,245 @@ public final class OmokEngine {
     }
 
     // ---------------------------------------------------------------- 표기
+
+    // ---------------------------------------------------------------- VCT (연속 3·4 필승 탐색)
+    //
+    // 열린 3(상대가 안 막으면 다음에 열린 4)과 4(반드시 막아야 함)를 섞어서, 상대가 어떻게 막아도
+    // 이기는 수순을 찾는다. 공격 쪽은 위협 수만 두고, 수비 쪽은 위협을 없애는 모든 자리와 반격 4를 검토한다.
+
+    static final int VCT_DEPTH = 6;   // 공격 수 기준 최대 깊이
+    static final int VCT_NODES = 3000; // 검토할 판의 수 (기기 속도와 상관없이 같은 결과가 나오도록 주로 이것으로 제한)
+    static final long VCT_MS = 400;    // 안전용 시간 제한
+    private long vctDeadline;
+
+    public List<int[]> findVct(int p, int maxDepth, int limit, long timeMs) {
+        nodeCount = 0;
+        nodeLimit = limit;
+        vctDeadline = System.nanoTime() + timeMs * 1_000_000L;
+        int opp = opponent(p);
+        for (int[] c : candidates(1)) if (makesFive(c[0], c[1], opp)) return null;
+        // 짧은 수순부터 찾는다 (반복 심화) — 가장 빨리 이기는 길을 먼저 찾고, 다음 수에서도 같은 길을 다시 찾기 쉽다
+        for (int depth = 2; depth <= maxDepth; depth++) {
+            List<int[]> r = vctAttack(p, depth);
+            if (r != null) return r;
+            if (vctOutOfBudget()) break;
+        }
+        return null;
+    }
+
+    // ---------------------------------------------------------------- 필승 계획 기억
+    // 필승 수순을 찾으면, 상대가 수순대로 응수했을 때의 판을 기억해 두고 다음 수에서 그대로 이어서 둔다.
+    // (탐색 시간이 모자라 다음 수에서 수순을 놓치는 일을 막음)
+
+    private static final java.util.Map<Long, Object[]> PLANS = new java.util.HashMap<>();
+
+    private long planKey(int p) {
+        return hash ^ (p == BLACK ? 0x9E3779B97F4A7C15L : 0x632BE59BD9B4E019L) ^ ((long) size << 56) ^ ((long) rules << 48);
+    }
+
+    private void rememberPlan(int p, List<int[]> line, boolean vct) {
+        int opp = opponent(p);
+        List<int[]> placed = new ArrayList<>();
+        synchronized (PLANS) {
+            if (PLANS.size() > 200) PLANS.clear();
+            for (int i = 0; i + 1 < line.size(); i += 2) {
+                int[] mine = line.get(i), theirs = line.get(i + 1);
+                if (get(mine[0], mine[1]) != EMPTY) break;
+                set(mine[0], mine[1], p);
+                placed.add(mine);
+                if (get(theirs[0], theirs[1]) != EMPTY) break;
+                set(theirs[0], theirs[1], opp);
+                placed.add(theirs);
+                if (i + 2 < line.size()) {
+                    PLANS.put(planKey(p), new Object[]{new ArrayList<>(line.subList(i + 2, line.size())), vct});
+                }
+            }
+        }
+        for (int i = placed.size() - 1; i >= 0; i--) set(placed.get(i)[0], placed.get(i)[1], EMPTY);
+    }
+
+    private Object[] planFor(int p) {
+        Object[] plan;
+        synchronized (PLANS) {
+            plan = PLANS.get(planKey(p));
+        }
+        if (plan == null) return null;
+        @SuppressWarnings("unchecked")
+        List<int[]> line = (List<int[]>) plan[0];
+        int[] next = line.get(0);
+        if (get(next[0], next[1]) != EMPTY || isForbidden(next[0], next[1], p)) return null;
+        return plan;
+    }
+
+    private boolean vctOutOfBudget() {
+        return nodeCount > nodeLimit || System.nanoTime() > vctDeadline;
+    }
+
+    /** p가 다음 한 수로 막을 수 없는 공격(5목, 열린 4, 4-4, 금수 유도 4)을 만들 수 있는가 */
+    private boolean hasWinningThreat(int p) {
+        for (int[] c : candidatesNear(2, p)) {
+            int x = c[0], y = c[1];
+            if (makesFive(x, y, p)) return true;
+            if (isForbidden(x, y, p)) continue;
+            Shape s = analyze(x, y, p);
+            if (attackScore(s) >= 100_000) return true;
+            if (s.fours() > 0 && forbiddenTrapFour(x, y, p)) return true;
+        }
+        return false;
+    }
+
+    /** p가 4-3 이상의 강한 공격을 준비하고 있는가 (이때 상대는 3으로 느리게 공격하면 안 된다) */
+    private boolean hasStrongThreat(int p) {
+        for (int[] c : candidatesNear(2, p)) {
+            int x = c[0], y = c[1];
+            if (isForbidden(x, y, p)) continue;
+            Shape s = analyze(x, y, p);
+            if (attackScore(s) >= 50_000) return true;
+            if (s.fours() > 0 && forbiddenTrapFour(x, y, p)) return true;
+        }
+        return false;
+    }
+
+    private List<int[]> vctAttack(int a, int depth) {
+        if (depth <= 0 || ++nodeCount > nodeLimit || System.nanoTime() > vctDeadline) return null;
+        int d = opponent(a);
+        List<int[]> cands = candidatesNear(2, a);
+        for (int[] c : cands) {
+            if (makesFive(c[0], c[1], a)) {
+                List<int[]> win = new ArrayList<>();
+                win.add(c);
+                return win;
+            }
+        }
+        for (int[] c : candidates(1)) if (makesFive(c[0], c[1], d)) return null; // 상대가 먼저 5목 위협
+
+        boolean slowAllowed = !hasStrongThreat(d); // 상대에게 큰 위협이 있으면 4로만 공격
+        List<int[]> fours = new ArrayList<>();
+        List<long[]> threes = new ArrayList<>();
+        for (int[] c : cands) {
+            if (isForbidden(c[0], c[1], a)) continue;
+            Shape s = analyze(c[0], c[1], a);
+            if (s.fours() > 0) fours.add(c);
+            else if (slowAllowed && s.openThree > 0) threes.add(new long[]{attackScore(s), c[0], c[1]});
+        }
+
+        // 4로 공격 (상대는 반드시 막아야 함)
+        for (int[] c : fours) {
+            int x = c[0], y = c[1];
+            set(x, y, a);
+            List<int[]> wins = completionCells(x, y, a);
+            List<int[]> result = null;
+            if (wins.size() >= 2) {
+                result = new ArrayList<>();
+                result.add(c);
+                result.add(wins.get(0));
+                result.add(wins.get(1));
+            } else if (wins.size() == 1) {
+                int[] w = wins.get(0);
+                if (isForbidden(w[0], w[1], d)) {
+                    result = new ArrayList<>();
+                    result.add(c);
+                    result.add(w);
+                } else {
+                    set(w[0], w[1], d);
+                    if (completionCells(w[0], w[1], d).isEmpty()) {
+                        List<int[]> sub = vctAttack(a, depth - 1);
+                        if (sub != null) {
+                            result = new ArrayList<>();
+                            result.add(c);
+                            result.add(w);
+                            result.addAll(sub);
+                        }
+                    }
+                    set(w[0], w[1], EMPTY);
+                }
+            }
+            set(x, y, EMPTY);
+            if (result != null) return result;
+            if (vctOutOfBudget()) return null;
+        }
+
+        // 열린 3으로 공격 (점수 높은 것부터 8개)
+        threes.sort((p1, p2) -> Long.compare(p2[0], p1[0]));
+        for (int i = 0; i < threes.size() && i < 8; i++) {
+            int x = (int) threes.get(i)[1], y = (int) threes.get(i)[2];
+            set(x, y, a);
+            List<int[]> line = hasWinningThreat(a) ? vctDefend(a, x, y, depth, 2) : null;
+            set(x, y, EMPTY);
+            if (line != null) {
+                List<int[]> result = new ArrayList<>();
+                result.add(new int[]{x, y});
+                result.addAll(line);
+                return result;
+            }
+            if (vctOutOfBudget()) return null;
+        }
+        return null;
+    }
+
+    /**
+     * a가 (tx,ty)에 열린 3을 둔 직후, 수비 쪽 d의 모든 응수를 검토한다.
+     * 모든 응수에 대해 a가 이기면 대표 수순(응수, 공격, …)을, 하나라도 버티면 null.
+     */
+    private List<int[]> vctDefend(int a, int tx, int ty, int depth, int counterBudget) {
+        int d = opponent(a);
+        List<int[]> defenses = new ArrayList<>();
+        // 1) 위협을 없애는 자리 : 열린 3이 놓인 줄 위의 빈칸 중, 막고 나면 a의 필승 위협이 사라지는 곳
+        for (int[] dir : DIRS) {
+            for (int k = -5; k <= 5; k++) {
+                int x = tx + k * dir[0], y = ty + k * dir[1];
+                if (get(x, y) != EMPTY || isForbidden(x, y, d)) continue;
+                boolean dup = false;
+                for (int[] q : defenses) dup |= q[0] == x && q[1] == y;
+                if (dup) continue;
+                set(x, y, d);
+                boolean still = hasWinningThreat(a);
+                set(x, y, EMPTY);
+                if (!still) defenses.add(new int[]{x, y});
+            }
+        }
+        List<int[]> main = null;
+        for (int[] def : defenses) {
+            set(def[0], def[1], d);
+            List<int[]> sub = vctAttack(a, depth - 1);
+            set(def[0], def[1], EMPTY);
+            if (sub == null) return null; // 이 응수로 버팀
+            if (main == null) {
+                main = new ArrayList<>();
+                main.add(def);
+                main.addAll(sub);
+            }
+        }
+        // 2) 반격 4 : d가 4를 두면 a는 막아야 하고, 그 뒤 d가 다시 수비할 기회를 얻는다
+        for (int[] c : candidatesNear(2, d)) {
+            int x = c[0], y = c[1];
+            if (isForbidden(x, y, d)) continue;
+            if (analyze(x, y, d).fours() == 0) continue;
+            if (counterBudget <= 0) return null; // 반격이 너무 길어지면 확실하지 않으므로 필승으로 보지 않음
+            set(x, y, d);
+            List<int[]> wins = completionCells(x, y, d);
+            List<int[]> sub = null;
+            if (wins.size() == 1 && !isForbidden(wins.get(0)[0], wins.get(0)[1], a)) {
+                int[] w = wins.get(0);
+                set(w[0], w[1], a);
+                if (makesAnyFive(a)) {
+                    sub = new ArrayList<>(); // 막으면서 a가 5목 자리를 얻음 → 여전히 a 승리
+                } else if (hasWinningThreat(a)) {
+                    sub = vctDefend(a, tx, ty, depth - 1, counterBudget - 1);
+                }
+                set(w[0], w[1], EMPTY);
+            }
+            set(x, y, EMPTY);
+            if (sub == null) return null; // 반격으로 버티거나 오히려 d가 이김
+            if (vctOutOfBudget()) return null;
+        }
+        return main != null ? main : new ArrayList<>();
+    }
+
+    private boolean makesAnyFive(int p) {
+        for (int[] c : candidatesNear(1, p)) if (makesFive(c[0], c[1], p)) return true;
+        return false;
+    }
 
     /** 좌표 표기 (예: H8). 가로 A부터, 세로는 아래가 1 */
     public String coord(int x, int y) {

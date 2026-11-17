@@ -2,6 +2,7 @@ package com.omokhelper;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -110,6 +111,15 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "중지했습니다", Toast.LENGTH_SHORT).show();
         });
         card2.addView(stop);
+
+        // ---------------- 오목 기술
+        root.addView(section("📖 오목 기술·공식"));
+        LinearLayout guideCard = card();
+        root.addView(guideCard);
+        guideCard.addView(text("4-3, 3-3, VCF, VCT, 금수 유도, 26주형 등 이 앱이 쓰는 기술을 설명합니다.", 14, 0xFF3E3329, false));
+        Button guide = button("기술·공식 보기", 0xFF6D4C41);
+        guide.setOnClickListener(v -> showGuide());
+        guideCard.addView(guide);
 
         // ---------------- 사용 방법
         root.addView(section("사용 방법"));
@@ -253,6 +263,19 @@ public class MainActivity extends Activity {
             if (i == checked) b.setChecked(true);
         }
         return g;
+    }
+
+    private void showGuide() {
+        ScrollView sv = new ScrollView(this);
+        TextView t = text(Guide.text(), 14, 0xFF2B2118, false);
+        t.setPadding(dp(20), dp(12), dp(20), dp(12));
+        t.setTextIsSelectable(true);
+        sv.addView(t);
+        new AlertDialog.Builder(this)
+                .setTitle("오목 기술·공식")
+                .setView(sv)
+                .setPositiveButton("닫기", null)
+                .show();
     }
 
     // ------------------------------------------------------------------ 규칙

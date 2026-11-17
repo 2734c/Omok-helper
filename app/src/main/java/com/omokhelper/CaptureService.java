@@ -66,6 +66,7 @@ public class CaptureService extends Service implements OverlayController.Listene
     private int[] pending;
     private int stableCount;
     private String lastKey = "";
+    private String lastOpening;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -256,6 +257,16 @@ public class CaptureService extends Service implements OverlayController.Listene
         int side = engine.sideToMove();
         String counts = "흑 " + blacks + " · 백 " + whites + " · " + OmokEngine.ruleName(p.rules);
 
+        // 초반 주형 : 돌이 3개일 때 이름을 알아내 그 판이 끝날 때까지 보여 준다
+        int total = blacks + whites;
+        if (total < 3) lastOpening = null;
+        else if (total == 3) {
+            Openings.Match om = Openings.identify(engine);
+            lastOpening = om == null ? null : om.opening.title() + " " + om.opening.code
+                    + (om.opening.verdict != null ? " · " + om.opening.verdict : "");
+        }
+        if (lastOpening != null) counts += "\n📖 주형: " + lastOpening;
+
         float cw = (p.x1 - p.x0) / (n - 1), ch = (p.y1 - p.y0) / (n - 1);
         float cell = Math.min(Math.abs(cw), Math.abs(ch));
 
@@ -296,12 +307,12 @@ public class CaptureService extends Service implements OverlayController.Listene
         sb.append(colorName(side)).append(" 차례 추천 (").append(counts).append(")").append(forbiddenLine).append('\n');
         for (int i = 0; i < r.moves.size(); i++) {
             OmokEngine.Move m = r.moves.get(i);
-            boolean win = m.reason.startsWith("5목") || m.reason.startsWith("필승");
+            boolean win = m.reason.startsWith("5목") || m.reason.startsWith("필승") || m.reason.startsWith("금수 유도");
             markers.add(new OverlayController.Marker(p.x0 + m.x * cw, p.y0 + m.y * ch, i + 1, win));
             if (i < 3) sb.append(i + 1).append(". ").append(engine.coord(m.x, m.y)).append("  ").append(m.reason).append('\n');
         }
         if (r.winSequence != null) {
-            sb.append("★ 필승 수순: ");
+            sb.append(r.vct ? "★ 필승 수순(VCT): " : "★ 필승 수순(VCF): ");
             for (int i = 0; i < r.winSequence.size() && i < 9; i += 2) {
                 int[] c = r.winSequence.get(i);
                 if (i > 0) sb.append(" → ");
