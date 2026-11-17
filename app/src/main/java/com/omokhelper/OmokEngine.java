@@ -354,13 +354,22 @@ public final class OmokEngine {
 
     static final long WIN = 1_000_000L;
 
+    // 모양별 점수 (자가 대국으로 조정한 값). 실험할 때는 -Domok.wFour=... 처럼 바꿔 볼 수 있다.
+    static final long W_FOUR = Long.getLong("omok.wFour", 1_500L);
+    static final long W_OPEN3 = Long.getLong("omok.wOpen3", 1_000L);
+    static final long W_THREE = Long.getLong("omok.wThree", 150L);
+    static final long W_OPEN2 = Long.getLong("omok.wOpen2", 100L);
+    static final long W_TWO = Long.getLong("omok.wTwo", 15L);
+    /** 수비 점수 비율 (%) : 상대가 그 자리에 두었을 때의 점수를 얼마나 중요하게 볼지 */
+    static final long DEF_PCT = Long.getLong("omok.defPct", 80L);
+
     static long attackScore(Shape s) {
         if (s.five > 0) return WIN;
         int fours = s.fours();
         if (s.openFour > 0 || fours >= 2) return 100_000;
         if (fours >= 1 && s.openThree >= 1) return 50_000;
         if (s.openThree >= 2) return 20_000;
-        return fours * 1_500L + s.openThree * 1_000L + s.three * 150L + s.openTwo * 100L + s.two * 15L;
+        return fours * W_FOUR + s.openThree * W_OPEN3 + s.three * W_THREE + s.openTwo * W_OPEN2 + s.two * W_TWO;
     }
 
     // ---------------------------------------------------------------- 결과 객체
@@ -457,7 +466,7 @@ public final class OmokEngine {
             boolean trapDef = d < 100_000 && def.fours() > 0 && forbiddenTrapFour(x, y, opp);
             if (trapAtt) a = 100_000;
             if (trapDef) d = 100_000;
-            long score = a + d * 8 / 10 + centerBonus(x, y);
+            long score = a + d * DEF_PCT / 100 + centerBonus(x, y);
             String reason = reasonFor(att, def, a, d);
             if (trapAtt) reason = "금수 유도 — 상대가 막을 자리가 금수라 못 막음 (필승)";
             else if (trapDef && a < 100_000) reason = "상대의 금수 유도 차단 (안 막으면 짐)";

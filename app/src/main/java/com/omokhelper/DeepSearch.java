@@ -71,6 +71,8 @@ public final class DeepSearch {
     static final boolean SHARP_EVAL = !Boolean.getBoolean("omok.noSharp");
     static final boolean ORDERING = !Boolean.getBoolean("omok.noOrdering");
     static final boolean PVS = !Boolean.getBoolean("omok.noPvs");
+    /** 형세 판단에서 상대 모양 점수를 얼마나 빼는지 (%) */
+    static final long EVAL_OPP_PCT = Long.getLong("omok.evalOppPct", 90L);
 
     // 킬러 수 : 같은 깊이에서 가지치기를 일으킨 수 (다른 가지에서도 좋은 경우가 많다)
     private final short[][] killers = new short[MAX_PLY + 2][2];
@@ -122,7 +124,7 @@ public final class DeepSearch {
             if (oppFive) keep[i] = ds[i] >= OmokEngine.WIN;
             else if (oppBig) keep[i] = ds[i] >= 20_000 || fours[i] > 0;
             else keep[i] = true;
-            key[i] = as[i] + ds[i] * 8 / 10 + e.centerBonus(xs[i], ys[i]);
+            key[i] = as[i] + ds[i] * OmokEngine.DEF_PCT / 100 + e.centerBonus(xs[i], ys[i]);
             if (ORDERING) key[i] += Math.min(history[p - 1][ys[i] * e.size + xs[i]], 3_000);
         }
         if (oppFive) {
@@ -176,7 +178,7 @@ public final class DeepSearch {
                 opMax = Math.max(opMax, v);
             }
         }
-        long v = my - op * 9 / 10;
+        long v = my - op * EVAL_OPP_PCT / 100;
         if (SHARP_EVAL) {
             // (상대에게 5목 자리가 있으면 이 함수까지 오지 않는다 — genMoves 가 막는 수만 남기므로)
             if (myMax >= 100_000) v += 20_000_000;                         // 다음 수에 열린 4/4-4 → 막을 수 없음
