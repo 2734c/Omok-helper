@@ -67,6 +67,16 @@ public final class DeepSearch {
         boolean lost;   // 막을 수 없음 (막을 자리가 금수 등)
     }
 
+    // 개선 기법 켜고 끄기 (대국 테스트로 효과를 확인하기 위해 나눠 둠)
+    static final boolean SHARP_EVAL = !Boolean.getBoolean("omok.noSharp");
+    static final boolean ORDERING = !Boolean.getBoolean("omok.noOrdering");
+    static final boolean PVS = !Boolean.getBoolean("omok.noPvs");
+
+    // 킬러 수 : 같은 깊이에서 가지치기를 일으킨 수 (다른 가지에서도 좋은 경우가 많다)
+    private final short[][] killers = new short[MAX_PLY + 2][2];
+    // 히스토리 : 가지치기를 자주 일으킨 자리일수록 점수가 쌓인다
+    private final int[][] history = new int[2][19 * 19];
+
     private MoveList genMoves(int p, int width) {
         int opp = OmokEngine.opponent(p);
         List<int[]> cands = e.candidates(2);
@@ -113,6 +123,7 @@ public final class DeepSearch {
             else if (oppBig) keep[i] = ds[i] >= 20_000 || fours[i] > 0;
             else keep[i] = true;
             key[i] = as[i] + ds[i] * 8 / 10 + e.centerBonus(xs[i], ys[i]);
+            if (ORDERING) key[i] += Math.min(history[p - 1][ys[i] * e.size + xs[i]], 3_000);
         }
         if (oppFive) {
             ml.forced = true;
@@ -140,16 +151,37 @@ public final class DeepSearch {
 
     // ------------------------------------------------------------------ 형세 판단
 
-    /** p(둘 차례) 입장에서 판의 유리함. 양쪽이 만들 수 있는 모양의 점수 합을 비교한다. */
+    /**
+     * p(둘 차례) 입장에서 판의 유리함. 양쪽이 만들 수 있는 모양의 점수 합을 비교한다.
+     * 날카로운 판단(SHARP_EVAL) : 둘 차례인 쪽이 지금 막을 수 없는 공격(열린 4·4-4·금수 유도 4)을
+     * 만들 수 있으면 사실상 승리, 4-3을 만들 수 있으면 크게 유리하다고 본다.
+     */
     private int evaluate(int p) {
         int opp = OmokEngine.opponent(p);
-        long my = 0, op = 0;
+        long my = 0, op = 0, myMax = 0, opMax = 0;
         for (int[] c : e.candidates(2)) {
             int x = c[0], y = c[1];
-            if (!e.isForbidden(x, y, p)) my += Math.min(OmokEngine.attackScore(e.analyze(x, y, p)), 100_000);
-            if (!e.isForbidden(x, y, opp)) op += Math.min(OmokEngine.attackScore(e.analyze(x, y, opp)), 100_000);
+            if (!e.isForbidden(x, y, p)) {
+                OmokEngine.Shape s = e.analyze(x, y, p);
+                long v = OmokEngine.attackScore(s);
+                if (SHARP_EVAL && v < 100_000 && s.fours() > 0 && e.forbiddenTrapFour(x, y, p)) v = 100_000;
+                my += Math.min(v, 100_000);
+                myMax = Math.max(myMax, v);
+            }
+            if (!e.isForbidden(x, y, opp)) {
+                OmokEngine.Shape s = e.analyze(x, y, opp);
+                long v = OmokEngine.attackScore(s);
+                if (SHARP_EVAL && v < 100_000 && s.fours() > 0 && e.forbiddenTrapFour(x, y, opp)) v = 100_000;
+                op += Math.min(v, 100_000);
+                opMax = Math.max(opMax, v);
+            }
         }
         long v = my - op * 9 / 10;
+        if (SHARP_EVAL) {
+            // (상대에게 5목 자리가 있으면 이 함수까지 오지 않는다 — genMoves 가 막는 수만 남기므로)
+            if (myMax >= 100_000) v += 20_000_000;                         // 다음 수에 열린 4/4-4 → 막을 수 없음
+            else if (myMax >= 50_000 && opMax < 100_000) v += 5_000_000;   // 4-3 준비 완료
+        }
         return (int) Math.max(-50_000_000, Math.min(50_000_000, v));
     }
 
@@ -182,13 +214,34 @@ public final class DeepSearch {
         if (ml.n == 0) return 0; // 둘 곳 없음 = 무승부
         if ((depth <= 0 && !ml.forced) || ply >= MAX_PLY) return evaluate(p);
 
-        // 치환표에 기억된 최선의 수를 먼저 검토하면 가지치기가 잘 된다
+        // 킬러 수를 앞쪽(치환표 수 다음)으로
+        if (ORDERING && ply < killers.length) {
+            int front = 0;
+            for (int kk = 0; kk < 2; kk++) {
+                int kill = killers[ply][kk];
+                if (kill <= 0) continue;
+                for (int i = front; i < ml.n; i++) {
+                    if (ml.ys[i] * e.size + ml.xs[i] == kill) {
+                        int tx = ml.xs[i], ty = ml.ys[i];
+                        ml.xs[i] = ml.xs[front];
+                        ml.ys[i] = ml.ys[front];
+                        ml.xs[front] = tx;
+                        ml.ys[front] = ty;
+                        front++;
+                        break;
+                    }
+                }
+            }
+        }
+        // 치환표에 기억된 최선의 수를 맨 앞으로 — 가지치기가 가장 잘 된다
         if (ttBest >= 0) {
             for (int i = 1; i < ml.n; i++) {
                 if (ml.ys[i] * e.size + ml.xs[i] == ttBest) {
                     int tx = ml.xs[i], ty = ml.ys[i];
-                    ml.xs[i] = ml.xs[0];
-                    ml.ys[i] = ml.ys[0];
+                    for (int j = i; j > 0; j--) { // 순서를 유지하며 맨 앞으로 밀어 넣기
+                        ml.xs[j] = ml.xs[j - 1];
+                        ml.ys[j] = ml.ys[j - 1];
+                    }
                     ml.xs[0] = tx;
                     ml.ys[0] = ty;
                     break;
@@ -203,7 +256,14 @@ public final class DeepSearch {
         for (int i = 0; i < ml.n; i++) {
             int x = ml.xs[i], y = ml.ys[i];
             e.set(x, y, p);
-            int v = -negamax(opp, newDepth, -beta, -alpha, ply + 1);
+            int v;
+            if (i == 0 || !PVS) {
+                v = -negamax(opp, newDepth, -beta, -alpha, ply + 1);
+            } else {
+                // PVS : 첫 수보다 나쁠 것이라 가정하고 좁은 창으로 빠르게 확인, 아니면 다시 정확히
+                v = -negamax(opp, newDepth, -alpha - 1, -alpha, ply + 1);
+                if (v > alpha && v < beta && !stopped) v = -negamax(opp, newDepth, -beta, -alpha, ply + 1);
+            }
             e.set(x, y, OmokEngine.EMPTY);
             if (stopped) return 0;
             if (v > best) {
@@ -211,7 +271,17 @@ public final class DeepSearch {
                 bestMove = y * e.size + x;
             }
             if (v > alpha) alpha = v;
-            if (alpha >= beta) break;
+            if (alpha >= beta) {
+                if (ORDERING) {
+                    int cellIdx = y * e.size + x;
+                    if (ply < killers.length && killers[ply][0] != cellIdx) {
+                        killers[ply][1] = killers[ply][0];
+                        killers[ply][0] = (short) cellIdx;
+                    }
+                    history[p - 1][cellIdx] += Math.max(1, depth) * Math.max(1, depth);
+                }
+                break;
+            }
         }
 
         ttKey[idx] = h;
@@ -247,7 +317,13 @@ public final class DeepSearch {
             for (int i = 0; i < out.moves.size() && !stopped; i++) {
                 RootMove m = out.moves.get(i);
                 e.set(m.x, m.y, p);
-                vals[i] = -negamax(opp, depth - 1, -INF, INF, 1);
+                if (PVS && i >= ROOT_EXACT) {
+                    // 상위 ROOT_EXACT개 보다 나은지만 확인 (나쁘면 점수 상한만 얻고 빨리 끝남)
+                    int kth = kthBest(vals, i, ROOT_EXACT);
+                    vals[i] = -negamax(opp, depth - 1, -INF, -kth, 1);
+                } else {
+                    vals[i] = -negamax(opp, depth - 1, -INF, INF, 1);
+                }
                 e.set(m.x, m.y, OmokEngine.EMPTY);
             }
             if (stopped) break; // 이번 깊이는 다 못 끝냈으므로 이전 결과를 쓴다
@@ -261,6 +337,16 @@ public final class DeepSearch {
         out.nodes = nodes;
         out.pv = principalVariation(p, out.moves.get(0));
         return out;
+    }
+
+    /** 추천으로 보여 줄 상위 몇 개는 정확한 점수를 구한다 */
+    private static final int ROOT_EXACT = 3;
+
+    /** vals[0..count) 중 k번째로 큰 값 */
+    private static int kthBest(int[] vals, int count, int k) {
+        int[] c = java.util.Arrays.copyOf(vals, count);
+        java.util.Arrays.sort(c);
+        return c[count - k];
     }
 
     /** 치환표를 따라가며 예상 수순을 만든다 */
