@@ -468,7 +468,8 @@ public final class OmokEngine {
                     score = 900_000;
                     score = myVct ? 880_000 : 900_000;
                     reason = "필승 수순(" + (myVct ? "연속 3·4, VCT" : "연속 4") + (myTrap ? " + 금수 유도" : "") + ") 시작 — "
-                            + (res.winSequence.size() + 1) / 2 + "수 만에 승리";
+                            + (myVct && res.winSequence.size() == 1 ? "상대가 막을 곳이 없음"
+                            : (res.winSequence.size() + 1) / 2 + "수 만에 승리");
                 }
             } else if (res.threatSequence != null && a < WIN && d < WIN) {
                 // 상대의 필승 수순에 쓰이는 자리를 막는다 (상대의 첫 수가 가장 중요)
@@ -546,6 +547,14 @@ public final class OmokEngine {
         }
 
         DeepSearch.Outcome o = new DeepSearch(this).run(p, timeMs, 20);
+        if (o.moves.isEmpty()) {
+            // 막을 수 없는 형세 (예: 막아야 할 자리가 내 금수) — 그래도 둘 수 있는 수 중 가장 나은 것을 보여 준다
+            while (base.moves.size() > topN) base.moves.remove(base.moves.size() - 1);
+            for (Move m : base.moves) {
+                if (!m.reason.startsWith("이미 불리")) m.reason = "이미 불리 (막을 수 없음) · " + m.reason;
+            }
+            return base;
+        }
         Result res = new Result();
         res.player = p;
         res.threatSequence = base.threatSequence;

@@ -95,4 +95,24 @@ public class VctTest {
                 "........O......");
         assertNull(e.findVct(OmokEngine.BLACK, OmokEngine.VCT_DEPTH, 20_000, 2000));
     }
+
+    /** 렌주룰 흑이 막을 자리가 전부 금수인 진 형세에서도 추천이 비어 있으면 안 된다 */
+    @Test
+    public void lostPositionStillGivesMoves() {
+        OmokEngine e = OmokEngineTest.board(true,
+                "...............",
+                "...............",
+                ".......X.......",
+                "....XOOO.O.....",
+                "......XOXX.....",
+                ".....OXOX......",
+                ".........O.....",
+                "......OX.X.....");
+        // 백이 (8,3)에 두면 5목, 흑은 (8,3)이 금수라 막을 수 없음
+        assertTrue(e.makesFive(8, 3, OmokEngine.WHITE));
+        assertTrue(e.isForbidden(8, 3, OmokEngine.BLACK));
+        OmokEngine.Result r = e.recommendDeep(OmokEngine.BLACK, 3, 200);
+        assertFalse(r.moves.isEmpty());
+        assertTrue(r.moves.get(0).reason, r.moves.get(0).reason.startsWith("이미 불리"));
+    }
 }
