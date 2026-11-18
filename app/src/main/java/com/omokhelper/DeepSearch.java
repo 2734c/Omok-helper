@@ -72,7 +72,7 @@ public final class DeepSearch {
     static final boolean ORDERING = !Boolean.getBoolean("omok.noOrdering");
     static final boolean PVS = !Boolean.getBoolean("omok.noPvs");
     /** 형세 판단에서 상대 모양 점수를 얼마나 빼는지 (%) */
-    static final long EVAL_OPP_PCT = Long.getLong("omok.evalOppPct", 90L);
+    static final long EVAL_OPP_PCT = Long.getLong("omok.evalOppPct", 70L); // 자가 대국으로 90 → 70 조정
 
     // 킬러 수 : 같은 깊이에서 가지치기를 일으킨 수 (다른 가지에서도 좋은 경우가 많다)
     private final short[][] killers = new short[MAX_PLY + 2][2];
