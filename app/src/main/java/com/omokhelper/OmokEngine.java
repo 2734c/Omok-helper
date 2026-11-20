@@ -402,6 +402,8 @@ public final class OmokEngine {
         public int searchNodes;                  // 검토한 판의 수
         public boolean vct;                      // winSequence 가 연속 3·4(VCT) 수순인가
         public String opening;                   // 초반 주형 이름 (알 수 있을 때만)
+        public boolean decided;                  // 답이 정해진 상황 (승리·5목 막기·필승 수순)
+        public boolean learned;                  // 1순위가 지난 패배에서 배운 수
     }
 
     // ---------------------------------------------------------------- 추천
@@ -525,6 +527,39 @@ public final class OmokEngine {
      * 그 밖에는 DeepSearch(알파-베타)로 timeMs 동안 여러 수 앞을 읽어 순위를 정한다.
      */
     public Result recommendDeep(int p, int topN, long timeMs) {
+        return applyLearned(p, topN, recommendDeepInner(p, topN, timeMs));
+    }
+
+    /**
+     * 지난 패배에서 배운 수(LearnedBook)가 이 판에 있으면 1순위로 올린다.
+     * 단, 바로 이기는 수·5목 막기·필승 수순처럼 답이 정해진 경우는 그대로 둔다.
+     */
+    private Result applyLearned(int p, int topN, Result r) {
+        LearnedBook book = LearnedBook.active;
+        if (book == null || r.decided) return r;
+        int[] lm = book.lookup(cells, size, rules, p);
+        if (lm == null || get(lm[0], lm[1]) != EMPTY || isForbidden(lm[0], lm[1], p)) return r;
+        Result out = new Result();
+        out.player = r.player;
+        out.threatSequence = r.threatSequence;
+        out.pv = r.pv;
+        out.searchDepth = r.searchDepth;
+        out.searchNodes = r.searchNodes;
+        out.opening = r.opening;
+        out.learned = true;
+        String why = null;
+        for (Move m : r.moves) if (m.x == lm[0] && m.y == lm[1]) why = m.reason;
+        long top = r.moves.isEmpty() ? 0 : r.moves.get(0).score;
+        out.moves.add(new Move(lm[0], lm[1], top + 1, "📚 지난 패배에서 배운 수" + (why != null ? " · " + why : "")));
+        for (Move m : r.moves) {
+            if (out.moves.size() >= topN) break;
+            if (m.x == lm[0] && m.y == lm[1]) continue;
+            out.moves.add(m);
+        }
+        return out;
+    }
+
+    private Result recommendDeepInner(int p, int topN, long timeMs) {
         // 초반 정석 : 흑 3수는 흑 필승으로 알려진 주형 자리를 먼저 추천
         if (p == BLACK) {
             List<Object[]> book = Openings.bookThirdMoves(this);
@@ -552,6 +587,7 @@ public final class OmokEngine {
                 || base.moves.get(0).score >= 800_000 || candidates(2).isEmpty();
         if (decided) {
             while (base.moves.size() > topN) base.moves.remove(base.moves.size() - 1);
+            base.decided = !base.moves.isEmpty();
             return base;
         }
 
@@ -570,6 +606,7 @@ public final class OmokEngine {
         res.searchDepth = o.depth;
         res.searchNodes = o.nodes;
         res.pv = o.pv;
+        res.decided = o.moves.get(0).value >= DeepSearch.WIN_SCORE - 100; // 깊이 탐색이 필승을 찾음
         int opp = opponent(p);
         for (DeepSearch.RootMove rm : o.moves) {
             if (res.moves.size() >= topN) break;

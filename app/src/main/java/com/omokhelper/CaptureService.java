@@ -70,6 +70,11 @@ public class CaptureService extends Service implements OverlayController.Listene
     private volatile boolean panelCovers;
     private boolean countMismatch;
 
+    // 패배 학습 : 판을 기록하고, 지면 복기해서 배운다
+    private GameTracker tracker;
+    private final java.util.concurrent.atomic.AtomicBoolean reviewing = new java.util.concurrent.atomic.AtomicBoolean();
+    private volatile String finishStatus;
+
     @Override
     public IBinder onBind(Intent intent) {
         return null;
@@ -102,6 +107,7 @@ public class CaptureService extends Service implements OverlayController.Listene
             return START_NOT_STICKY;
         }
 
+        LearningStore.load(this); // 지난 패배에서 배운 수 불러오기
         overlay = new OverlayController(this, this);
         overlay.show();
         if (!Prefs.load(this).calibrated) {
@@ -264,7 +270,64 @@ public class CaptureService extends Service implements OverlayController.Listene
         lastKey = key;
         forceUpdate = false;
 
+        // 기보 기록 (판 크기·규칙이 바뀌면 새로 시작)
+        if (tracker == null || trackerKey == null || !trackerKey.equals(p.boardSize + "/" + p.rules)) {
+            tracker = new GameTracker(p.boardSize, p.rules);
+            trackerKey = p.boardSize + "/" + p.rules;
+        }
+        int event = tracker.update(board);
+        if (event == GameTracker.NEW_GAME) finishStatus = null;
+        if (event == GameTracker.FINISHED) onGameFinished(p);
+        if (tracker.finished()) { // 끝난 판에는 추천 대신 결과를 보여 준다
+            String s = finishStatus;
+            main.post(() -> overlay.showResult(new ArrayList<>(), new ArrayList<>(), 0, s == null ? "🏁 대국 종료" : s));
+            return;
+        }
+
         analyzeAndShow(board, p);
+    }
+
+    private String trackerKey;
+
+    /** 판이 끝남 : 기록하고, 내가 졌으면 복기해서 배운다 */
+    private void onGameFinished(Prefs p) {
+        int winner = tracker.winner(), loser = OmokEngine.opponent(winner);
+        String result = "🏁 " + colorName(winner) + " 승 (" + tracker.steps().size() + "수)";
+        boolean myLoss = p.myColor == 0 || p.myColor == loser; // 자동 모드면 진 쪽에서 배운다
+        String record = tracker.record();
+        if (!myLoss || !LearningStore.isEnabled(this) || LearnedBook.active == null || tracker.steps().size() < 6) {
+            LearningStore.addGame(this, record, false, null);
+            finishStatus = result;
+            return;
+        }
+        finishStatus = result + "\n📚 진 판을 복기하는 중… (" + colorName(loser) + "의 실수 찾기)";
+        if (!reviewing.compareAndSet(false, true)) return;
+        final java.util.List<GameTracker.Step> steps = new ArrayList<>(tracker.steps());
+        final int size = p.boardSize, rules = p.rules;
+        Thread t = new Thread(() -> {
+            String lessonNote = null;
+            try {
+                java.util.List<GameReview.Lesson> lessons = GameReview.review(steps, size, rules, loser, 800, 20);
+                LearnedBook book = LearnedBook.active;
+                for (GameReview.Lesson l : lessons) {
+                    if (book != null) book.learn(l.board, size, rules, l.side, l.betterX, l.betterY);
+                    lessonNote = l.note;
+                }
+                if (book != null) LearningStore.saveBook(this, book);
+            } catch (Exception e) {
+                Log.e(TAG, "review failed", e);
+            } finally {
+                LearningStore.addGame(this, record, true, lessonNote);
+                reviewing.set(false);
+            }
+            String s = result + "\n" + (lessonNote != null
+                    ? "📚 복기 완료 — 배운 수: " + lessonNote + "\n다음에 같은 판이 나오면 이 수를 먼저 추천해요."
+                    : "📚 복기 완료 — 결정적인 실수를 찾지 못했어요 (그 전부터 이미 불리했을 수 있어요)");
+            finishStatus = s;
+            if (tracker != null && tracker.finished()) main.post(() -> overlay.setStatus(s));
+        }, "omok-review");
+        t.setPriority(Thread.MIN_PRIORITY);
+        t.start();
     }
 
     private void analyzeAndShow(int[] board, Prefs p) {
@@ -352,6 +415,7 @@ public class CaptureService extends Service implements OverlayController.Listene
                 sb.append(r.searchDepth).append("수 앞까지 탐색 (").append(r.searchNodes).append("개 판 검토)\n");
             }
             if (r.threatSequence != null) sb.append("⚠ 상대에게 연속 4 필승 수순이 있어요!");
+            if (r.learned) sb.append("\n📚 1순위는 지난 패배에서 배운 수예요.");
         }
         String status = sb.toString().trim() + coverWarning();
         main.post(() -> overlay.showResult(markers, dots, cell, status, side));

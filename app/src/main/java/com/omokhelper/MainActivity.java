@@ -112,6 +112,42 @@ public class MainActivity extends Activity {
         });
         card2.addView(stop);
 
+        // ---------------- 패배 학습
+        root.addView(section("📚 패배 학습"));
+        LinearLayout learnCard = card();
+        root.addView(learnCard);
+        learnCard.addView(text("판을 기록하다가 지면, 어디서 잘못 두었는지 복기해서 더 나은 수를 기억합니다.\n"
+                + "다음에 같은 판(돌리거나 뒤집은 모양 포함)이 나오면 그 수를 1순위로 추천해요.\n"
+                + "추천 받을 돌이 '자동'이면 진 쪽의 실수에서 배웁니다.", 14, 0xFF3E3329, false));
+        CheckBox learnOn = new CheckBox(this);
+        learnOn.setText("질 때마다 복기해서 배우기");
+        learnOn.setChecked(LearningStore.isEnabled(this));
+        learnOn.setOnCheckedChangeListener((b, on) -> LearningStore.setEnabled(this, on));
+        learnCard.addView(learnOn);
+        learnCard.addView(text(LearningStore.stats(this), 13, 0xFF6B5B4B, false));
+        Button copy = button("최근 기보 복사 (최대 10판)", 0xFF6D4C41);
+        copy.setOnClickListener(v -> {
+            String rec = LearningStore.recentRecords(this);
+            if (rec.isEmpty()) {
+                Toast.makeText(this, "아직 기록한 판이 없어요", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            android.content.ClipboardManager cm = getSystemService(android.content.ClipboardManager.class);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("오목 기보", rec));
+            Toast.makeText(this, "기보를 복사했어요. 개선 요청할 때 붙여 넣어 주세요", Toast.LENGTH_LONG).show();
+        });
+        learnCard.addView(copy);
+        Button reset = button("배운 내용 초기화", 0xFF9E9E9E);
+        reset.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setMessage("배운 수와 기록을 모두 지울까요?")
+                .setPositiveButton("지우기", (d, w) -> {
+                    LearningStore.clear(this);
+                    buildUi();
+                })
+                .setNegativeButton("취소", null)
+                .show());
+        learnCard.addView(reset);
+
         // ---------------- 오목 기술
         root.addView(section("📖 오목 기술·공식"));
         LinearLayout guideCard = card();
