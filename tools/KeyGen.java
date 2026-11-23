@@ -18,9 +18,12 @@ import java.util.Base64;
  * 오목 도우미 키 생성기 (저작권자 전용)
  *
  * 사용법 (Java 11 이상, 이 파일이 있는 폴더에서):
- *   java KeyGen.java make 7                 7번 키, 무기한
- *   java KeyGen.java make 8 2027-03-01      8번 키, 2027-03-01까지 사용 가능
- *   java KeyGen.java make 10 20             10번부터 20번까지 여러 개 (무기한)
+ *   java KeyGen.java issue 12 K7Q2-9XMA              12번 키, 그 기기 전용, 오늘부터 30일
+ *   java KeyGen.java issue 12 K7Q2-9XMA +60          60일
+ *   java KeyGen.java issue 12 K7Q2-9XMA 2027-03-01   2027-03-01까지
+ *
+ * 기기 코드(K7Q2-9XMA)는 사용자가 앱 첫 화면의 "🔑 키" 칸에서 복사해 보내 줍니다.
+ * 한 달마다 같은 기기 코드로 새 키를 만들어 주면 갱신됩니다. (키 번호는 사람마다 하나씩 정해 두고 계속 써도 됩니다)
  *
  * 비밀 키 파일 omok-private.key 가 같은 폴더에 있어야 합니다.
  * ⚠ 비밀 키 파일은 절대 GitHub에 올리거나 다른 사람에게 주지 마세요. (누구나 키를 만들 수 있게 됩니다)
@@ -31,7 +34,7 @@ import java.util.Base64;
  */
 public class KeyGen {
 
-    static final String PREFIX = "OMOK1-";
+    static final String PREFIX = "OMOK2-";
     static final Path PRIVATE = Paths.get("omok-private.key");
 
     public static void main(String[] args) throws Exception {
@@ -43,8 +46,8 @@ public class KeyGen {
             case "init":
                 init();
                 break;
-            case "make":
-                make(args);
+            case "issue":
+                issue(args);
                 break;
             default:
                 usage();
@@ -53,8 +56,7 @@ public class KeyGen {
 
     static void usage() {
         System.out.println("사용법:");
-        System.out.println("  java KeyGen.java make <번호> [만료일 YYYY-MM-DD]");
-        System.out.println("  java KeyGen.java make <시작번호> <끝번호>");
+        System.out.println("  java KeyGen.java issue <번호> <기기코드> [+일수 | 만료일 YYYY-MM-DD]   (기본 +30)");
         System.out.println("  java KeyGen.java init");
     }
 
@@ -72,34 +74,55 @@ public class KeyGen {
         System.out.println(Base64.getEncoder().encodeToString(kp.getPublic().getEncoded()));
     }
 
-    static void make(String[] args) throws Exception {
-        if (args.length < 2) {
+    static final String ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+    /** "K7Q2-9XMA" → 40비트 값. 형식이 틀리면 -1 */
+    static long parseDevice(String code) {
+        String c = code.replaceAll("[\\s-]", "").toUpperCase();
+        if (c.length() != 8) return -1;
+        long v = 0;
+        for (int i = 0; i < 8; i++) {
+            int k = ALPHABET.indexOf(c.charAt(i));
+            if (k < 0) return -1;
+            v = (v << 5) | k;
+        }
+        return v;
+    }
+
+    static void issue(String[] args) throws Exception {
+        if (args.length < 3) {
             usage();
             return;
         }
+        int id = Integer.parseInt(args[1]);
+        if (id < 1 || id > 65535) throw new IllegalArgumentException("번호는 1~65535");
+        long device = parseDevice(args[2]);
+        if (device < 0) throw new IllegalArgumentException("기기 코드 형식이 올바르지 않습니다 (예: K7Q2-9XMA). I, O, 0, 1 은 쓰지 않습니다");
+
+        LocalDate today = LocalDate.now();
+        LocalDate until;
+        String when = args.length >= 4 ? args[3] : "+30";
+        if (when.startsWith("+")) until = today.plusDays(Integer.parseInt(when.substring(1)));
+        else until = LocalDate.parse(when);
+        if (!until.isAfter(today)) throw new IllegalArgumentException("만료일은 오늘 이후여야 합니다");
+        long expiry = until.toEpochDay();
+        if (expiry > 65535) throw new IllegalArgumentException("만료일이 너무 멀어요");
+
         PrivateKey key = KeyFactory.getInstance("EC").generatePrivate(new PKCS8EncodedKeySpec(
                 Base64.getDecoder().decode(new String(Files.readAllBytes(PRIVATE), StandardCharsets.US_ASCII).trim())));
-
-        int from = Integer.parseInt(args[1]);
-        int to = from;
-        int expiry = 0;
-        if (args.length >= 3) {
-            if (args[2].contains("-")) {
-                expiry = (int) LocalDate.parse(args[2]).toEpochDay();
-            } else {
-                to = Integer.parseInt(args[2]);
-            }
-        }
-        if (from < 1 || to > 65535 || to < from) throw new IllegalArgumentException("번호는 1~65535");
-        for (int id = from; id <= to; id++) {
-            System.out.println("#" + id + (expiry == 0 ? " (무기한)" : " (" + LocalDate.ofEpochDay(expiry) + "까지)")
-                    + "  " + makeKey(key, id, expiry));
-        }
+        System.out.println("#" + id + "  기기 " + args[2].toUpperCase() + "  " + today + " ~ " + until + " (" + (expiry - today.toEpochDay()) + "일)");
+        System.out.println(makeKey(key, id, (int) expiry, device));
     }
 
-    static String makeKey(PrivateKey key, int id, int expiry) throws Exception {
-        byte[] payload = {1, (byte) (id >> 8), (byte) id, (byte) (expiry >> 8), (byte) expiry};
-        byte[] head = "OMOK1".getBytes(StandardCharsets.US_ASCII);
+    static String makeKey(PrivateKey key, int id, int expiry, long device) throws Exception {
+        byte[] payload = new byte[10];
+        payload[0] = 2;
+        payload[1] = (byte) (id >> 8);
+        payload[2] = (byte) id;
+        payload[3] = (byte) (expiry >> 8);
+        payload[4] = (byte) expiry;
+        for (int i = 0; i < 5; i++) payload[5 + i] = (byte) (device >> (8 * (4 - i)));
+        byte[] head = "OMOK2".getBytes(StandardCharsets.US_ASCII);
         byte[] signed = Arrays.copyOf(head, head.length + payload.length);
         System.arraycopy(payload, 0, signed, head.length, payload.length);
 

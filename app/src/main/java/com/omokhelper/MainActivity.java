@@ -372,10 +372,66 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------ 키 입력
 
     private void buildKeyCard(LinearLayout keyCard, boolean pro) {
+        // 이 기기 코드 : 키를 받을 때 알려 주는 값 (키는 이 기기에서만 쓸 수 있다)
+        final String code = License.deviceCode(this);
+        keyCard.addView(text("이 기기 코드 : " + code, 16, 0xFF2B2118, true));
+        keyCard.addView(text("키는 이 코드의 기기에서만 쓸 수 있고, 한 달마다 만료돼요. 키를 받으려면 이 코드를 보내 주세요.",
+                13, 0xFF6B5B4B, false));
+        Button copyCode = button("기기 코드 복사", 0xFF6D4C41);
+        copyCode.setOnClickListener(v -> {
+            android.content.ClipboardManager cm = getSystemService(android.content.ClipboardManager.class);
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("기기 코드", code));
+            Toast.makeText(this, "기기 코드를 복사했어요: " + code, Toast.LENGTH_LONG).show();
+        });
+        keyCard.addView(copyCode);
+
         LicenseKey k = License.current(this);
         if (pro && k != null) {
-            TextView ok = text("✓ 키 등록됨 (" + License.describe(k) + ")\n모든 기능을 쓸 수 있어요.", 14, 0xFF2E7D32, true);
-            keyCard.addView(ok);
+            long left = License.daysLeft(this);
+            int color = left <= 5 ? 0xFFE65100 : 0xFF2E7D32;
+            keyCard.addView(text("✓ 키 등록됨 (" + License.describe(this, k) + ")\n모든 기능을 쓸 수 있어요."
+                    + (left <= 5 ? "\n⏳ 곧 만료돼요. 새 키를 받아 아래에 등록하면 이어서 쓸 수 있어요." : ""), 14, color, true));
+        } else {
+            String problem = License.problem(this);
+            if (problem != null) keyCard.addView(text("⚠ " + problem, 14, 0xFFB71C1C, true));
+            keyCard.addView(text("키가 없으면 흑/백 선택, 추천 5개, 생각 시간 3초를 쓸 수 없어요.", 14, 0xFF3E3329, false));
+        }
+
+        keyCard.addView(text(pro && k != null ? "새 키로 갱신" : "받은 키를 붙여 넣고 [키 등록]을 누르세요.", 14, 0xFF3E3329, true));
+        EditText input = new EditText(this);
+        input.setHint("OMOK2-…");
+        input.setTypeface(Typeface.MONOSPACE);
+        input.setTextSize(13);
+        input.setMinLines(2);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        keyCard.addView(input);
+        Button reg = button(pro && k != null ? "키 갱신" : "키 등록", 0xFF5D4037);
+        reg.setOnClickListener(v -> {
+            int r = License.register(this, input.getText().toString());
+            if (r == License.OK) {
+                Toast.makeText(this, "키가 등록되었습니다. 모든 기능이 열렸어요!", Toast.LENGTH_LONG).show();
+                buildUi();
+                return;
+            }
+            String msg;
+            switch (r) {
+                case License.EXPIRED:
+                    msg = "사용 기간이 지난 키입니다";
+                    break;
+                case License.WRONG_DEVICE:
+                    msg = "이 기기용 키가 아닙니다. 이 기기 코드(" + code + ")로 새 키를 받아 주세요";
+                    break;
+                case License.LEGACY_ENDED:
+                    msg = "예전 방식 키는 더 이상 쓸 수 없어요. 이 기기 코드(" + code + ")로 새 키를 받아 주세요";
+                    break;
+                default:
+                    msg = "올바르지 않은 키입니다. 다시 확인해 주세요";
+            }
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+        });
+        keyCard.addView(reg);
+        if (k != null || License.problem(this) != null) {
             Button remove = button("키 삭제", 0xFF9E9E9E);
             remove.setOnClickListener(v -> {
                 License.clear(this);
@@ -383,30 +439,7 @@ public class MainActivity extends Activity {
                 buildUi();
             });
             keyCard.addView(remove);
-            return;
         }
-        keyCard.addView(text("키가 없으면 흑/백 선택, 추천 5개, 생각 시간 3초를 쓸 수 없어요.\n"
-                + "받은 키(OMOK1-로 시작)를 붙여 넣고 [키 등록]을 누르세요.", 14, 0xFF3E3329, false));
-        EditText input = new EditText(this);
-        input.setHint("OMOK1-…");
-        input.setTypeface(Typeface.MONOSPACE);
-        input.setTextSize(13);
-        input.setMinLines(2);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
-        keyCard.addView(input);
-        Button reg = button("키 등록", 0xFF5D4037);
-        reg.setOnClickListener(v -> {
-            int r = License.register(this, input.getText().toString());
-            if (r == 0) {
-                Toast.makeText(this, "키가 등록되었습니다. 모든 기능이 열렸어요!", Toast.LENGTH_LONG).show();
-                buildUi();
-            } else {
-                Toast.makeText(this, r == 2 ? "사용 기간이 지난 키입니다" : "올바르지 않은 키입니다. 다시 확인해 주세요",
-                        Toast.LENGTH_LONG).show();
-            }
-        });
-        keyCard.addView(reg);
         keyCard.addView(text("키 문의 : Discord axkoth", 12, 0xFF8D6E63, false));
     }
 

@@ -14,11 +14,25 @@ android {
         versionName "1.0"
     }
 
+    // 모든 빌드를 같은 키로 서명한다. (CI 서버는 빌드마다 새 임시 디버그 키를 만들어서,
+    // 그대로 두면 업데이트 설치가 거부되고 기기 코드도 바뀐다.)
+    // 이 키는 업데이트 설치용이며 비밀이 아니다 (저장소에 공개되어 있음).
+    signingConfigs {
+        stable {
+            storeFile file('../signing/omok.keystore')
+            storePassword 'omokhelper'
+            keyAlias 'omok'
+            keyPassword 'omokhelper'
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
-            // 수행평가용: 별도 서명키 없이 설치할 수 있도록 디버그 키로 서명
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.stable
+        }
+        debug {
+            signingConfig signingConfigs.stable
         }
     }
 

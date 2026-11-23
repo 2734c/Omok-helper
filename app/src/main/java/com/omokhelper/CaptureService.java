@@ -340,6 +340,11 @@ public class CaptureService extends Service implements OverlayController.Listene
         int side = engine.sideToMove();
         String counts = "흑 " + blacks + " · 백 " + whites + " · " + OmokEngine.ruleName(p.rules);
 
+        long keyLeft = License.daysLeft(this);
+        if (keyLeft >= 0 && keyLeft <= 3) {
+            counts += "\n⏳ 키가 " + (keyLeft == 0 ? "오늘" : keyLeft + "일 뒤") + " 만료돼요 (첫 화면에서 새 키로 갱신)";
+        }
+
         // 초반 주형 : 돌이 3개일 때 이름을 알아내 그 판이 끝날 때까지 보여 준다
         int total = blacks + whites;
         if (total < 3) lastOpening = null;
